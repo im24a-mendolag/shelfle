@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id          String    @id @default(uuid()) @db.Uuid
+  steamId     String    @unique @db.VarChar(20)
+  displayName String    @db.VarChar(100)
+  createdAt   DateTime  @default(now()) @db.Timestamptz()
+  syncedAt    DateTime? @db.Timestamptz()
+
+  games       UserGame[]
+  roundsPlayed Round[]  @relation("PlayerRounds")
+  roundsOwned  Round[]  @relation("TargetRounds")
+  stats        Stats?
+
+  @@map("users")
+}
+
+model Game {
+  steamAppId       Int      @id
+  title            String   @db.VarChar(200)
+  headerImage      String   @default("")
+  tags             String[]
+  releaseYear      Int?     @db.SmallInt
+  reviewPct        Int?     @db.SmallInt
+  totalAchievements Int?    @db.SmallInt
+  avgPlayers24h    Int?
+  priceUsdCents    Int?
+  priceEurCents    Int?
+  priceChfCents    Int?
+  cachedAt         DateTime @default(now()) @db.Timestamptz()
+
+  userGames        UserGame[]
+  rounds           Round[]
+
+  @@map("games")
+}
+
+model UserGame {
+  userId       String @db.Uuid
+  steamAppId   Int
+  playtimeHours Int   @default(0)
+
+  user  User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game  Game @relation(fields: [steamAppId], references: [steamAppId], onDelete: Cascade)
+
+  @@id([userId, steamAppId])
+  @@map("user_games")
+}
+
+model Round {
+  id           String   @id @default(uuid()) @db.Uuid
+  playerUserId String   @db.Uuid
+  targetUserId String   @db.Uuid
+  targetAppId  Int
+  mode         String   @db.VarChar(20)
+  status       String   @db.VarChar(20) @default("active")
+  createdAt    DateTime @default(now()) @db.Timestamptz()
+
+  player  User     @relation("PlayerRounds", fields: [playerUserId], references: [id])
+  target  User     @relation("TargetRounds", fields: [targetUserId], references: [id])
+  game    Game     @relation(fields: [targetAppId], references: [steamAppId])
+  guesses Guess[]
+
+  @@map("rounds")
+}
+
+model Guess {
+  id           String   @id @default(uuid()) @db.Uuid
+  roundId      String   @db.Uuid
+  guessedAppId Int
+  resultJson   Json
+  guessedAt    DateTime @default(now()) @db.Timestamptz()
+
+  round Round @relation(fields: [roundId], references: [id], onDelete: Cascade)
+
+  @@map("guesses")
+}
+
+model Stats {
+  userId        String @id @db.Uuid
+  roundsPlayed  Int    @default(0)
+  roundsWon     Int    @default(0)
+  currentStreak Int    @default(0)
+  bestStreak    Int    @default(0)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("stats")
+}

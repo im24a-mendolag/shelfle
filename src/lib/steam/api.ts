@@ -1,3 +1,4 @@
+import { log } from "@/lib/logger";
 import type {
   SteamLibrary,
   SteamAppDetails,
@@ -9,6 +10,50 @@ const STEAM_API_KEY = process.env.STEAM_API_KEY!;
 const STEAM_API_BASE = "https://api.steampowered.com";
 const STORE_API_BASE = "https://store.steampowered.com/api";
 const STEAMSPY_BASE = "https://steamspy.com/api.php";
+
+/** Resolves a Steam vanity URL name to a 64-bit Steam ID string. */
+async function resolveVanityUrl(vanity: string): Promise<string | null> {
+  try {
+    const url = new URL(`${STEAM_API_BASE}/ISteamUser/ResolveVanityURL/v1/`);
+    url.searchParams.set("key", STEAM_API_KEY);
+    url.searchParams.set("vanityurl", vanity);
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.response?.success === 1 ? String(data.response.steamid) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Accepts a Steam ID (17-digit), profile URL, vanity URL, or vanity name.
+ * Returns the canonical 17-digit Steam ID string, or null if unresolvable.
+ */
+export async function resolveSteamId(input: string): Promise<string | null> {
+  const s = input.trim().replace(/\/$/, "");
+  const profileMatch = s.match(/steamcommunity\.com\/profiles\/(\d{17})/);
+  if (profileMatch) return profileMatch[1];
+  const vanityMatch = s.match(/steamcommunity\.com\/id\/([^/?]+)/);
+  if (vanityMatch) return resolveVanityUrl(vanityMatch[1]);
+  if (/^\d{17}$/.test(s)) return s;
+  return resolveVanityUrl(s);
+}
+
+/** Returns the Steam display name for a given Steam ID, falling back to the ID itself. */
+export async function getSteamDisplayName(steamId: string): Promise<string> {
+  try {
+    const url = new URL(`${STEAM_API_BASE}/ISteamUser/GetPlayerSummaries/v2/`);
+    url.searchParams.set("key", STEAM_API_KEY);
+    url.searchParams.set("steamids", steamId);
+    const res = await fetch(url.toString(), { next: { revalidate: 3600 } });
+    if (!res.ok) return steamId;
+    const data = await res.json();
+    return data?.response?.players?.[0]?.personaname ?? steamId;
+  } catch {
+    return steamId;
+  }
+}
 
 /**
  * Fetches all games owned by a Steam user.
@@ -23,18 +68,53 @@ export async function getOwnedGames(steamId: string): Promise<SteamLibrary> {
   url.searchParams.set("format", "json");
 
   const res = await fetch(url.toString(), { next: { revalidate: 3600 } });
-  if (!res.ok) throw new Error(`Steam GetOwnedGames failed: ${res.status}`);
+  if (!res.ok) {
+    log.error("GetOwnedGames failed", { steamId, status: res.status });
+    throw new Error(`Steam GetOwnedGames failed: ${res.status}`);
+  }
 
   const data = await res.json();
   const response = data?.response;
 
   if (!response || !response.games) {
+    log.warn("GetOwnedGames returned no games — profile may be private", { steamId });
     throw new Error(
       "No games returned — the Steam profile or game details may be set to private."
     );
   }
 
+  log.info("GetOwnedGames success", { steamId, gameCount: response.game_count });
   return response as SteamLibrary;
+}
+
+/** Fetches price for a single app in a given Steam country code (e.g. "us", "de", "ch"). */
+async function fetchPriceCents(appId: number, cc: string): Promise<number | null> {
+  try {
+    const url = new URL(`${STORE_API_BASE}/appdetails`);
+    url.searchParams.set("appids", String(appId));
+    url.searchParams.set("cc", cc);
+    const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) return null;
+    const data = await res.json();
+    const entry = data?.[String(appId)];
+    if (!entry?.success) return null;
+    if (entry.data.is_free) return 0;
+    return entry.data.price_overview?.final ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetches prices in USD, EUR, and CHF in parallel. */
+export async function getGamePrices(appId: number) {
+  const [usd, eur, chf] = await Promise.all([
+    fetchPriceCents(appId, "us"),
+    fetchPriceCents(appId, "de"),
+    fetchPriceCents(appId, "ch"),
+  ]);
+  return { usd, eur, chf };
 }
 
 /**
@@ -44,18 +124,29 @@ export async function getOwnedGames(steamId: string): Promise<SteamLibrary> {
 export async function getAppDetails(
   appId: number
 ): Promise<SteamAppDetails | null> {
-  const url = new URL(`${STORE_API_BASE}/appdetails`);
-  url.searchParams.set("appids", String(appId));
-  url.searchParams.set("l", "english");
+  try {
+    const url = new URL(`${STORE_API_BASE}/appdetails`);
+    url.searchParams.set("appids", String(appId));
+    url.searchParams.set("l", "english");
 
-  const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
-  if (!res.ok) return null;
+    const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
+    if (!res.ok) return null;
 
-  const data = await res.json();
-  const entry = data?.[String(appId)];
-  if (!entry?.success) return null;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      log.warn("getAppDetails non-JSON response", { appId, contentType });
+      return null;
+    }
 
-  return entry.data as SteamAppDetails;
+    const data = await res.json();
+    const entry = data?.[String(appId)];
+    if (!entry?.success) return null;
+
+    return entry.data as SteamAppDetails;
+  } catch (err) {
+    log.error("getAppDetails threw", { appId, err: String(err) });
+    return null;
+  }
 }
 
 /**
@@ -64,52 +155,112 @@ export async function getAppDetails(
 export async function getSteamSpyInfo(
   appId: number
 ): Promise<SteamSpyAppInfo | null> {
-  const url = new URL(STEAMSPY_BASE);
-  url.searchParams.set("request", "appinfo");
-  url.searchParams.set("appid", String(appId));
+  try {
+    const url = new URL(STEAMSPY_BASE);
+    url.searchParams.set("request", "appinfo");
+    url.searchParams.set("appid", String(appId));
 
-  const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
-  if (!res.ok) return null;
+    const res = await fetch(url.toString(), { next: { revalidate: 86400 } });
+    if (!res.ok) return null;
 
-  const data = await res.json();
-  return data as SteamSpyAppInfo;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      log.warn("getSteamSpyInfo non-JSON response", { appId, contentType });
+      return null;
+    }
+
+    const data = await res.json();
+    return data as SteamSpyAppInfo;
+  } catch (err) {
+    log.error("getSteamSpyInfo threw", { appId, err: String(err) });
+    return null;
+  }
 }
 
 /**
- * Parses a Steam release date string like "21 Nov, 2019" → 2019.
- * Returns null if unparseable.
+ * Fetches review score directly from the Steam Store reviews endpoint.
+ * Returns percentage of positive reviews (0-100), or null on failure.
+ * No API key required.
  */
+export async function getReviewScore(appId: number): Promise<number | null> {
+  try {
+    const url = `https://store.steampowered.com/appreviews/${appId}?json=1&language=all&purchase_type=all&num_per_page=0`;
+    const res = await fetch(url, { next: { revalidate: 86400 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const summary = data?.query_summary;
+    if (!summary || summary.total_reviews === 0) return null;
+    return Math.round((summary.total_positive / summary.total_reviews) * 100);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetches current concurrent players for an app directly from Steam.
+ * No API key required.
+ */
+export async function getCurrentPlayers(appId: number): Promise<number | null> {
+  try {
+    const url = `${STEAM_API_BASE}/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=${appId}`;
+    const res = await fetch(url, { next: { revalidate: 3600 } });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const count = data?.response?.player_count;
+    return typeof count === "number" ? count : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseReleaseYear(dateStr: string): number | null {
   const match = dateStr.match(/\d{4}/);
   return match ? parseInt(match[0], 10) : null;
 }
 
 /**
- * Converts disk size from bytes to GB, rounded to 1 decimal place.
+ * Parses disk size from the Steam Store pc_requirements HTML string.
+ * Strips HTML tags first so it handles any tag structure around "Storage:".
  */
-function bytesToGb(bytes?: number): number | null {
-  if (!bytes) return null;
-  return Math.round((bytes / 1_073_741_824) * 10) / 10;
+function parseDiskSizeGb(minimum?: string): number | null {
+  if (!minimum) return null;
+  const text = minimum.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+  const match = text.match(
+    /(?:Storage|Hard Disk Space|HDD|Disk Space)\s*:\s*[^0-9]*([\d,.]+)\s*(GB|MB|TB)/i
+  );
+  if (!match) return null;
+  const value = parseFloat(match[1].replace(/,/g, ""));
+  const unit = match[2].toUpperCase();
+  if (unit === "TB") return Math.round(value * 1024 * 10) / 10;
+  if (unit === "MB") return Math.round((value / 1024) * 10) / 10;
+  return Math.round(value * 10) / 10;
 }
 
 /**
- * Merges Steam Store + SteamSpy data into a normalized GameInfo object.
+ * Merges Steam Store + SteamSpy + player count into a normalized GameInfo object.
  */
 export function mergeGameInfo(
   appId: number,
   playtimeMinutes: number,
   details: SteamAppDetails | null,
-  spy: SteamSpyAppInfo | null
+  spy: SteamSpyAppInfo | null,
+  playerCount: number | null = null,
+  reviewPctOverride: number | null = null,
+  prices: { usd: number | null; eur: number | null; chf: number | null } = { usd: null, eur: null, chf: null },
 ): GameInfo {
-  const tags = spy?.tags ? Object.keys(spy.tags).slice(0, 10) : [];
+  const spyTags = spy?.tags ? Object.keys(spy.tags).slice(0, 10) : [];
+  const storeTags = [
+    ...(details?.genres?.map((g) => g.description) ?? []),
+    ...(details?.categories?.map((c) => c.description) ?? []),
+  ];
+  const tags = spyTags.length > 0 ? spyTags : storeTags.slice(0, 10);
 
-  const reviewPct =
+  const spyReviewPct =
     spy && spy.positive + spy.negative > 0
       ? Math.round((spy.positive / (spy.positive + spy.negative)) * 100)
       : null;
+  const reviewPct = reviewPctOverride ?? spyReviewPct;
 
-  // pc_requirements minimum field contains an HTML string — we skip disk size here
-  // (requires parsing HTML; stored separately via an enrichment job)
   return {
     steam_app_id: appId,
     title: details?.name ?? spy?.name ?? `App ${appId}`,
@@ -119,9 +270,11 @@ export function mergeGameInfo(
       ? parseReleaseYear(details.release_date.date)
       : null,
     review_pct: reviewPct,
-    total_achievements: details?.achievements?.total ?? null,
-    avg_players_24h: spy?.ccu ?? null,
-    disk_size_gb: null,
+    total_achievements: details !== null ? (details.achievements?.total ?? 0) : null,
+    avg_players_24h: playerCount ?? spy?.ccu ?? null,
+    price_usd_cents: prices.usd,
+    price_eur_cents: prices.eur,
+    price_chf_cents: prices.chf,
     playtime_hours: Math.round(playtimeMinutes / 60),
     metacritic_score: details?.metacritic?.score ?? null,
   };

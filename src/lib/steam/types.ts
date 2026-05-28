@@ -17,12 +17,20 @@ export interface SteamAppDetails {
   name: string;
   short_description: string;
   header_image: string;
+  is_free: boolean;
   release_date: { coming_soon: boolean; date: string };
   genres: { id: string; description: string }[];
   categories: { id: number; description: string }[];
   metacritic?: { score: number; url: string };
   achievements?: { total: number };
   pc_requirements?: { minimum?: string; recommended?: string };
+  price_overview?: {
+    currency: string;
+    initial: number;
+    final: number;
+    discount_percent: number;
+    final_formatted: string;
+  };
 }
 
 export interface SteamSpyAppInfo {
@@ -52,7 +60,9 @@ export interface GameInfo {
   review_pct: number | null;
   total_achievements: number | null;
   avg_players_24h: number | null;
-  disk_size_gb: number | null;
+  price_usd_cents: number | null;
+  price_eur_cents: number | null;
+  price_chf_cents: number | null;
   playtime_hours: number;
   metacritic_score: number | null;
 }

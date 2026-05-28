@@ -5,7 +5,7 @@ import SteamLoginButton from "@/components/SteamLoginButton";
 
 export default async function Home() {
   const session = await getServerSession(authCallbacks);
-  if (session) redirect("/library");
+  if (session) redirect("/play");
 
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gray-950 text-white gap-6">

@@ -19,3 +19,8 @@ next-env.d.ts
 # OS
 .DS_Store
 Thumbs.db
+
+# Logs
+logs/
+
+/src/generated/prisma
