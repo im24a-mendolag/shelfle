@@ -68,6 +68,7 @@ model Round {
   game    Game     @relation(fields: [targetAppId], references: [steamAppId])
   guesses Guess[]
 
+  @@index([playerUserId, status])
   @@map("rounds")
 }
 

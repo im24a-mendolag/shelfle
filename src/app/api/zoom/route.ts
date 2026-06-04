@@ -5,32 +5,26 @@ import { authCallbacks } from "@/lib/auth/config";
 import { db } from "@/lib/db";
 import { syncUser, syncLibrary } from "@/lib/steam/sync";
 import { resolveSteamId, getSteamProfile } from "@/lib/steam/api";
-import type { GuessComparison } from "@/lib/game/compare";
 
-const MAX_GUESSES = 8;
+const MAX_GUESSES = 6;
+
+type ZoomGuess = { guessedAppId: number; title: string; headerImage: string; won: boolean };
 
 async function pickEnrichedGame(userId: string) {
   const userGames = await db.userGame.findMany({
     where: { userId },
     include: {
       game: {
-        select: {
-          steamAppId: true,
-          tags: true,
-          releaseYear: true,
-          reviewPct: true,
-          headerImage: true,
-        },
+        select: { steamAppId: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true },
       },
     },
   });
-
   return userGames.filter(
     (ug) =>
+      ug.game.headerImage !== "" &&
       ug.game.tags.length > 0 &&
       ug.game.releaseYear !== null &&
-      ug.game.reviewPct !== null &&
-      ug.game.headerImage !== "",
+      ug.game.reviewPct !== null,
   );
 }
 
@@ -42,27 +36,24 @@ export async function GET() {
   if (!user) return NextResponse.json({ round: null });
 
   const round = await db.round.findFirst({
-    where: { playerUserId: user.id, mode: { in: ["solo", "friend"] }, status: "active" },
+    where: { playerUserId: user.id, mode: "zoom", status: "active" },
     include: { guesses: { orderBy: { guessedAt: "asc" } }, game: true, target: true },
     orderBy: { createdAt: "desc" },
   });
 
   if (!round) return NextResponse.json({ round: null });
 
-  const guesses = round.guesses.map((g) => g.resultJson as GuessComparison);
-  const won = guesses.some((g) => g.won);
-  const lost = !won && guesses.length >= MAX_GUESSES;
-  const finished = won || lost || round.status !== "active";
+  const guesses = round.guesses.map((g) => g.resultJson as ZoomGuess);
+  const isFriend = round.targetUserId !== user.id;
 
   return NextResponse.json({
     round: {
       id: round.id,
       status: round.status,
-      mode: round.mode,
-      friendName: round.mode === "friend" ? round.target.displayName : undefined,
       guesses,
       maxGuesses: MAX_GUESSES,
-      ...(finished ? { targetTitle: round.game.title, targetHeaderImage: round.game.headerImage } : {}),
+      targetHeaderImage: round.game.headerImage,
+      friendName: isFriend ? round.target.displayName : undefined,
     },
   });
 }
@@ -82,7 +73,6 @@ export async function POST(req: NextRequest) {
   const friendInput: string | undefined = body.friendSteamId;
 
   let targetUser = user;
-  let mode = "solo";
 
   if (friendInput) {
     const friendSteamId = await resolveSteamId(friendInput);
@@ -105,15 +95,18 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-    revalidateTag("library");
     revalidateTag("game-search");
-    mode = "friend";
+    revalidateTag("library");
   }
 
   const enriched = await pickEnrichedGame(targetUser.id);
   if (enriched.length === 0) {
     return NextResponse.json(
-      { error: mode === "friend" ? "Friend's library has no enriched games yet or their profile is private." : "No enriched games found. Visit your library page first." },
+      {
+        error: friendInput
+          ? "Friend's library has no enriched games yet or their profile is private."
+          : "No enriched games found. Visit your library page first.",
+      },
       { status: 400 },
     );
   }
@@ -125,7 +118,7 @@ export async function POST(req: NextRequest) {
       playerUserId: user.id,
       targetUserId: targetUser.id,
       targetAppId: pick.game.steamAppId,
-      mode,
+      mode: "zoom",
       status: "active",
     },
   });
@@ -134,10 +127,10 @@ export async function POST(req: NextRequest) {
     round: {
       id: round.id,
       status: "active",
-      mode,
-      friendName: mode === "friend" ? targetUser.displayName : undefined,
       guesses: [],
       maxGuesses: MAX_GUESSES,
+      targetHeaderImage: pick.game.headerImage,
+      friendName: friendInput ? targetUser.displayName : undefined,
     },
   });
 }

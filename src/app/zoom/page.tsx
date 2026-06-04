@@ -2,9 +2,9 @@ import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authCallbacks } from "@/lib/auth/config";
 import { syncUser, syncLibrary } from "@/lib/steam/sync";
-import GameClient from "@/components/game/GameClient";
+import ZoomClient from "@/components/game/ZoomClient";
 
-export default async function PlayPage({
+export default async function ZoomPage({
   searchParams,
 }: {
   searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
@@ -18,5 +18,5 @@ export default async function PlayPage({
   }
 
   const { friend, friendName, friendAvatar } = await searchParams;
-  return <GameClient defaultFriend={friend} defaultFriendName={friendName} defaultFriendAvatar={friendAvatar} />;
+  return <ZoomClient defaultFriend={friend} defaultFriendName={friendName} defaultFriendAvatar={friendAvatar} />;
 }

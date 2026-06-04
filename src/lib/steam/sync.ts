@@ -1,7 +1,6 @@
-import { revalidateTag } from "next/cache";
 import { db } from "@/lib/db";
 import { log } from "@/lib/logger";
-import { getOwnedGames, getAppDetails, getSteamSpyInfo, getCurrentPlayers, getReviewScore, getGamePrices, mergeGameInfo } from "./api";
+import { getOwnedGames, getAppDetails, getCurrentPlayers, getReviewScore, getGamePrices, mergeGameInfo } from "./api";
 
 /** Upsert the user row on every login. Returns the DB user. */
 export async function syncUser(steamId: string, displayName: string) {
@@ -14,99 +13,93 @@ export async function syncUser(steamId: string, displayName: string) {
 
 const SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
-function needsSync(syncedAt: Date | null): boolean {
+function needsListSync(syncedAt: Date | null): boolean {
   if (!syncedAt) return true;
   return Date.now() - syncedAt.getTime() > SYNC_INTERVAL_MS;
 }
 
 /**
- * Syncs a user's Steam library with the DB:
- * 1. Fetches owned games from Steam
- * 2. Ensures every game has at least a stub row in `games`
- * 3. Enriches games that have never been cached (tags/details missing)
- * 4. Upserts playtime into `user_games`
+ * Syncs a user's Steam library:
+ * - List sync (Steam API fetch + stub upserts): gated by syncedAt, once per hour
+ * - Enrichment (details/prices/review): always runs until all games are enriched
  */
 export async function syncLibrary(userId: string, steamId: string) {
   const user = await db.user.findUnique({ where: { id: userId }, select: { syncedAt: true } });
 
-  if (!needsSync(user?.syncedAt ?? null)) {
-    log.info("Library sync skipped (synced recently)", { userId });
-    const existing = await db.userGame.count({ where: { userId } });
-    return existing;
+  let gameCount: number;
+
+  if (needsListSync(user?.syncedAt ?? null)) {
+    const library = await getOwnedGames(steamId);
+    const { games } = library;
+
+    // Stub-insert all games (single query, skip existing)
+    await db.game.createMany({
+      data: games.map((g) => ({
+        steamAppId: g.appid,
+        title: g.name ?? `App ${g.appid}`,
+        headerImage: "",
+        tags: [],
+      })),
+      skipDuplicates: true,
+    });
+
+    // Upsert playtime for every game (parallel chunks)
+    const CHUNK = 25;
+    for (let i = 0; i < games.length; i += CHUNK) {
+      await Promise.all(
+        games.slice(i, i + CHUNK).map((g) =>
+          db.userGame.upsert({
+            where: { userId_steamAppId: { userId, steamAppId: g.appid } },
+            update: { playtimeHours: Math.round(g.playtime_forever / 60) },
+            create: {
+              userId,
+              steamAppId: g.appid,
+              playtimeHours: Math.round(g.playtime_forever / 60),
+            },
+          })
+        )
+      );
+    }
+
+    await db.user.update({ where: { id: userId }, data: { syncedAt: new Date() } });
+    gameCount = library.game_count;
+  } else {
+    gameCount = await db.userGame.count({ where: { userId } });
   }
 
-  const library = await getOwnedGames(steamId);
-  const { games } = library;
-
-  const BATCH = 100;
-
-  // --- Step 1: stub-upsert all games so FK constraints are satisfied ---
-  for (let i = 0; i < games.length; i += BATCH) {
-    const batch = games.slice(i, i + BATCH);
-    await db.$transaction(
-      batch.map((g) =>
-        db.game.upsert({
-          where: { steamAppId: g.appid },
-          update: {},
-          create: {
-            steamAppId: g.appid,
-            title: g.name ?? `App ${g.appid}`,
-            headerImage: "",
-            tags: [],
-          },
-        })
-      )
-    );
-  }
-
-  // --- Step 2: upsert playtime for every game ---
-  for (let i = 0; i < games.length; i += BATCH) {
-    const batch = games.slice(i, i + BATCH);
-    await db.$transaction(
-      batch.map((g) =>
-        db.userGame.upsert({
-          where: { userId_steamAppId: { userId, steamAppId: g.appid } },
-          update: { playtimeHours: Math.round(g.playtime_forever / 60) },
-          create: {
-            userId,
-            steamAppId: g.appid,
-            playtimeHours: Math.round(g.playtime_forever / 60),
-          },
-        })
-      )
-    );
-  }
-
-  // --- Step 3: enrich games that were never enriched or cached over 7 days ago ---
+  // Enrichment always runs — keeps going across visits until all games are done
   const staleThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const unenriched = await db.game.findMany({
+  const toEnrich = await db.game.findMany({
     where: {
-      steamAppId: { in: games.map((g) => g.appid) },
+      userGames: { some: { userId } },
       OR: [
         { tags: { isEmpty: true } },
         { cachedAt: { lt: staleThreshold } },
       ],
     },
-    select: { steamAppId: true },
+    select: { steamAppId: true, tags: true },
   });
+
+  const needsFull = toEnrich.filter((g) => g.tags.length === 0).slice(0, 50);
+  const needsRefresh = toEnrich.filter((g) => g.tags.length > 0).slice(0, 50);
 
   log.info("Library sync", {
     steamId,
-    total: games.length,
-    unenriched: unenriched.length,
+    listSynced: needsListSync(user?.syncedAt ?? null),
+    gameCount,
+    enrichFull: needsFull.length,
+    enrichRefresh: needsRefresh.length,
+    enrichRemaining: Math.max(0, toEnrich.length - needsFull.length - needsRefresh.length),
   });
 
-  for (const { steamAppId } of unenriched.slice(0, 50)) {
-    const playtime = games.find((g) => g.appid === steamAppId)?.playtime_forever ?? 0;
-    const [details, spy, playerCount, reviewPct, prices] = await Promise.all([
+  for (const { steamAppId } of needsFull) {
+    const [details, playerCount, reviewPct, prices] = await Promise.all([
       getAppDetails(steamAppId),
-      getSteamSpyInfo(steamAppId),
       getCurrentPlayers(steamAppId),
       getReviewScore(steamAppId),
       getGamePrices(steamAppId),
     ]);
-    const info = mergeGameInfo(steamAppId, playtime, details, spy, playerCount, reviewPct, prices);
-
+    const info = mergeGameInfo(steamAppId, 0, details, null, playerCount, reviewPct, prices);
     await db.game.update({
       where: { steamAppId },
       data: {
@@ -117,16 +110,26 @@ export async function syncLibrary(userId: string, steamId: string) {
         reviewPct: info.review_pct,
         totalAchievements: info.total_achievements,
         avgPlayers24h: info.avg_players_24h,
-        priceUsdCents: info.price_usd_cents,
-        priceEurCents: info.price_eur_cents,
         priceChfCents: info.price_chf_cents,
         cachedAt: new Date(),
       },
     });
   }
 
-  await db.user.update({ where: { id: userId }, data: { syncedAt: new Date() } });
-  revalidateTag("library");
+  for (const { steamAppId } of needsRefresh) {
+    const [playerCount, reviewPct] = await Promise.all([
+      getCurrentPlayers(steamAppId),
+      getReviewScore(steamAppId),
+    ]);
+    await db.game.update({
+      where: { steamAppId },
+      data: {
+        ...(reviewPct !== null ? { reviewPct } : {}),
+        ...(playerCount !== null ? { avgPlayers24h: playerCount } : {}),
+        cachedAt: new Date(),
+      },
+    });
+  }
 
-  return library.game_count;
+  return gameCount;
 }

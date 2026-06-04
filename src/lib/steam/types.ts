@@ -60,8 +60,6 @@ export interface GameInfo {
   review_pct: number | null;
   total_achievements: number | null;
   avg_players_24h: number | null;
-  price_usd_cents: number | null;
-  price_eur_cents: number | null;
   price_chf_cents: number | null;
   playtime_hours: number;
   metacritic_score: number | null;

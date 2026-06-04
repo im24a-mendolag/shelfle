@@ -40,20 +40,22 @@ export async function resolveSteamId(input: string): Promise<string | null> {
   return resolveVanityUrl(s);
 }
 
-/** Returns the Steam display name for a given Steam ID, falling back to the ID itself. */
-export async function getSteamDisplayName(steamId: string): Promise<string> {
+/** Returns display name + avatar URL for a Steam ID. */
+export async function getSteamProfile(steamId: string): Promise<{ displayName: string; avatarUrl: string | null }> {
   try {
     const url = new URL(`${STEAM_API_BASE}/ISteamUser/GetPlayerSummaries/v2/`);
     url.searchParams.set("key", STEAM_API_KEY);
     url.searchParams.set("steamids", steamId);
     const res = await fetch(url.toString(), { next: { revalidate: 3600 } });
-    if (!res.ok) return steamId;
+    if (!res.ok) return { displayName: steamId, avatarUrl: null };
     const data = await res.json();
-    return data?.response?.players?.[0]?.personaname ?? steamId;
+    const player = data?.response?.players?.[0];
+    return { displayName: player?.personaname ?? steamId, avatarUrl: player?.avatarmedium ?? null };
   } catch {
-    return steamId;
+    return { displayName: steamId, avatarUrl: null };
   }
 }
+
 
 /**
  * Fetches all games owned by a Steam user.
@@ -83,7 +85,6 @@ export async function getOwnedGames(steamId: string): Promise<SteamLibrary> {
     );
   }
 
-  log.info("GetOwnedGames success", { steamId, gameCount: response.game_count });
   return response as SteamLibrary;
 }
 
@@ -107,14 +108,10 @@ async function fetchPriceCents(appId: number, cc: string): Promise<number | null
   }
 }
 
-/** Fetches prices in USD, EUR, and CHF in parallel. */
+/** Fetches CHF price for an app. */
 export async function getGamePrices(appId: number) {
-  const [usd, eur, chf] = await Promise.all([
-    fetchPriceCents(appId, "us"),
-    fetchPriceCents(appId, "de"),
-    fetchPriceCents(appId, "ch"),
-  ]);
-  return { usd, eur, chf };
+  const chf = await fetchPriceCents(appId, "ch");
+  return { chf };
 }
 
 /**
@@ -196,6 +193,46 @@ export async function getReviewScore(appId: number): Promise<number | null> {
   }
 }
 
+export interface SteamFriend {
+  steamId: string;
+  displayName: string;
+  avatarUrl: string;
+}
+
+/**
+ * Fetches the friend list for a Steam user and returns enriched summaries.
+ * Returns an empty array if the profile is private or the call fails.
+ */
+export async function getSteamFriends(steamId: string): Promise<SteamFriend[]> {
+  try {
+    const listUrl = new URL(`${STEAM_API_BASE}/ISteamUser/GetFriendList/v1/`);
+    listUrl.searchParams.set("key", STEAM_API_KEY);
+    listUrl.searchParams.set("steamid", steamId);
+    listUrl.searchParams.set("relationship", "friend");
+    const listRes = await fetch(listUrl.toString(), { next: { revalidate: 300 } });
+    if (!listRes.ok) return [];
+    const listData = await listRes.json();
+    const friends: { steamid: string }[] = listData?.friendslist?.friends ?? [];
+    if (friends.length === 0) return [];
+
+    const ids = friends.slice(0, 100).map((f) => f.steamid).join(",");
+    const sumUrl = new URL(`${STEAM_API_BASE}/ISteamUser/GetPlayerSummaries/v2/`);
+    sumUrl.searchParams.set("key", STEAM_API_KEY);
+    sumUrl.searchParams.set("steamids", ids);
+    const sumRes = await fetch(sumUrl.toString(), { next: { revalidate: 300 } });
+    if (!sumRes.ok) return [];
+    const sumData = await sumRes.json();
+    const players: { steamid: string; personaname: string; avatarmedium: string }[] =
+      sumData?.response?.players ?? [];
+
+    return players
+      .map((p) => ({ steamId: p.steamid, displayName: p.personaname, avatarUrl: p.avatarmedium }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Fetches current concurrent players for an app directly from Steam.
  * No API key required.
@@ -246,7 +283,7 @@ export function mergeGameInfo(
   spy: SteamSpyAppInfo | null,
   playerCount: number | null = null,
   reviewPctOverride: number | null = null,
-  prices: { usd: number | null; eur: number | null; chf: number | null } = { usd: null, eur: null, chf: null },
+  prices: { chf: number | null } = { chf: null },
 ): GameInfo {
   const spyTags = spy?.tags ? Object.keys(spy.tags).slice(0, 10) : [];
   const storeTags = [
@@ -272,39 +309,8 @@ export function mergeGameInfo(
     review_pct: reviewPct,
     total_achievements: details !== null ? (details.achievements?.total ?? 0) : null,
     avg_players_24h: playerCount ?? spy?.ccu ?? null,
-    price_usd_cents: prices.usd,
-    price_eur_cents: prices.eur,
     price_chf_cents: prices.chf,
     playtime_hours: Math.round(playtimeMinutes / 60),
     metacritic_score: details?.metacritic?.score ?? null,
   };
-}
-
-/**
- * Fetches the full enriched library for a Steam user.
- * Calls getOwnedGames, then enriches each game with Store + SteamSpy data.
- *
- * @param steamId   64-bit Steam ID
- * @param limit     Cap the number of enriched games (default: all). Useful during dev.
- */
-export async function getEnrichedLibrary(
-  steamId: string,
-  limit?: number
-): Promise<GameInfo[]> {
-  const library = await getOwnedGames(steamId);
-  const games = limit ? library.games.slice(0, limit) : library.games;
-
-  const results = await Promise.allSettled(
-    games.map(async (game) => {
-      const [details, spy] = await Promise.all([
-        getAppDetails(game.appid),
-        getSteamSpyInfo(game.appid),
-      ]);
-      return mergeGameInfo(game.appid, game.playtime_forever, details, spy);
-    })
-  );
-
-  return results
-    .filter((r): r is PromiseFulfilledResult<GameInfo> => r.status === "fulfilled")
-    .map((r) => r.value);
 }
