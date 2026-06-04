@@ -4,11 +4,15 @@ import { NextRequest } from "next/server";
 import { authCallbacks } from "@/lib/auth/config";
 
 function buildAuthOptions(req: NextRequest) {
+  const baseUrl =
+    process.env.NEXTAUTH_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
+
   return {
     providers: [
       SteamProvider(req, {
         clientSecret: process.env.STEAM_API_KEY!,
-        callbackUrl: `${process.env.NEXTAUTH_URL}/api/auth/callback/steam`,
+        callbackUrl: `${baseUrl}/api/auth/callback/steam`,
       }),
     ],
     ...authCallbacks,
