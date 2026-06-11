@@ -314,3 +314,56 @@ export function mergeGameInfo(
     metacritic_score: details?.metacritic?.score ?? null,
   };
 }
+
+export type AchievementInfo = {
+  apiName: string;
+  displayName: string;
+  description: string;
+  iconUrl: string;
+};
+
+/** Returns achievements for a game that have both a display name and description. */
+export async function getGameAchievements(appId: number): Promise<AchievementInfo[]> {
+  try {
+    const url = new URL(`${STEAM_API_BASE}/ISteamUserStats/GetSchemaForGame/v2/`);
+    url.searchParams.set("key", STEAM_API_KEY);
+    url.searchParams.set("appid", String(appId));
+    url.searchParams.set("l", "english");
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const achievements: unknown[] = data?.game?.availableGameStats?.achievements ?? [];
+    return (achievements as Array<{
+      name: string;
+      displayName?: string;
+      description?: string;
+      icon?: string;
+      hidden?: number;
+    }>)
+      .filter((a) => a.hidden !== 1 && a.displayName && a.description && a.icon)
+      .map((a) => ({
+        apiName: a.name,
+        displayName: a.displayName!,
+        description: a.description!,
+        iconUrl: a.icon!,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Returns a map of achievement API name → global unlock percentage. */
+export async function getAchievementPercentages(appId: number): Promise<Record<string, number>> {
+  try {
+    const url = new URL(`${STEAM_API_BASE}/ISteamUserStats/GetGlobalAchievementPercentagesForApp/v2/`);
+    url.searchParams.set("gameid", String(appId));
+    const res = await fetch(url.toString(), { cache: "no-store" });
+    if (!res.ok) return {};
+    const data = await res.json();
+    const list: { name: string; percent: number }[] =
+      data?.achievementpercentages?.achievements ?? [];
+    return Object.fromEntries(list.map((a) => [a.name, a.percent]));
+  } catch {
+    return {};
+  }
+}

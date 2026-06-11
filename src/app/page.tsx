@@ -4,6 +4,7 @@ import { syncUser } from "@/lib/steam/sync";
 import { getSteamFriends } from "@/lib/steam/api";
 import { db } from "@/lib/db";
 import Link from "next/link";
+import { GAME_MODES } from "@/lib/gameModes";
 import SteamLoginButton from "@/components/SteamLoginButton";
 import FriendLibraryInput from "@/components/FriendLibraryInput";
 import FriendsList from "@/components/FriendsList";
@@ -55,39 +56,40 @@ export default async function Home() {
       )}
 
       {/* Mode cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-        <Link
-          href="/play"
-          className="group flex flex-col gap-2 bg-blue-600 hover:bg-blue-500 rounded-2xl px-6 py-6 transition-colors"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold">Classic</h2>
-            <span className="text-2xl text-blue-200 group-hover:translate-x-1 transition-transform">→</span>
+      {(() => {
+        const footerText: Record<string, string> = {
+          "/play": `${enrichedCount.toLocaleString()} games ready`,
+          "/zoom": `${gameCount.toLocaleString()} games in your library`,
+        };
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
+            {GAME_MODES.map((mode) => (
+              <Link
+                key={mode.path}
+                href={mode.path}
+                className={`group flex flex-col gap-2 rounded-2xl px-6 py-6 transition-colors ${
+                  mode.accent
+                    ? "bg-blue-600 hover:bg-blue-500"
+                    : "bg-gray-900 border border-gray-800 hover:border-gray-600"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold">{mode.label}</h2>
+                  <span className={`text-2xl transition-transform ${mode.accent ? "text-blue-200 group-hover:translate-x-1" : "text-gray-500 group-hover:text-white"}`}>→</span>
+                </div>
+                <p className={`text-sm ${mode.accent ? "text-blue-200" : "text-gray-400"}`}>
+                  {mode.description}
+                </p>
+                {footerText[mode.path] && (
+                  <p className={`text-xs mt-auto pt-2 border-t ${mode.accent ? "text-blue-300 border-blue-500" : "text-gray-600 border-gray-800"}`}>
+                    {footerText[mode.path]}
+                  </p>
+                )}
+              </Link>
+            ))}
           </div>
-          <p className="text-blue-200 text-sm">
-            Guess by tags, year, reviews & more
-          </p>
-          <p className="text-blue-300 text-xs mt-auto pt-2 border-t border-blue-500">
-            {enrichedCount.toLocaleString()} games ready
-          </p>
-        </Link>
-
-        <Link
-          href="/zoom"
-          className="group flex flex-col gap-2 bg-gray-900 border border-gray-800 hover:border-gray-600 rounded-2xl px-6 py-6 transition-colors"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold">Zoom</h2>
-            <span className="text-gray-500 group-hover:text-white text-2xl transition-colors">→</span>
-          </div>
-          <p className="text-gray-400 text-sm">
-            Guess from a progressively zoomed-out image
-          </p>
-          <p className="text-gray-600 text-xs mt-auto pt-2 border-t border-gray-800">
-            {gameCount.toLocaleString()} games in your library
-          </p>
-        </Link>
-      </div>
+        );
+      })()}
 
       {/* Friends section */}
       <section>

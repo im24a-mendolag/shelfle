@@ -2,14 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { GAME_MODES } from "@/lib/gameModes";
 
 type Friend = { steamId: string; displayName: string; avatarUrl: string };
-
-const GAME_MODES = [
-  { label: "Classic", href: (f: Friend) => `/play?friend=${encodeURIComponent(f.steamId)}&friendName=${encodeURIComponent(f.displayName)}&friendAvatar=${encodeURIComponent(f.avatarUrl)}` },
-  { label: "Zoom", href: (f: Friend) => `/zoom?friend=${encodeURIComponent(f.steamId)}&friendName=${encodeURIComponent(f.displayName)}&friendAvatar=${encodeURIComponent(f.avatarUrl)}` },
-  { label: "Higher/Lower", href: (f: Friend) => `/higherlower?friend=${encodeURIComponent(f.steamId)}&friendName=${encodeURIComponent(f.displayName)}&friendAvatar=${encodeURIComponent(f.avatarUrl)}` },
-];
 
 function PlayDropdown({ friend }: { friend: Friend }) {
   const [open, setOpen] = useState(false);
@@ -37,7 +32,7 @@ function PlayDropdown({ friend }: { friend: Friend }) {
           {GAME_MODES.map((mode) => (
             <Link
               key={mode.label}
-              href={mode.href(friend)}
+              href={`${mode.path}?friend=${encodeURIComponent(friend.steamId)}&friendName=${encodeURIComponent(friend.displayName)}&friendAvatar=${encodeURIComponent(friend.avatarUrl)}`}
               onClick={() => setOpen(false)}
               className="block px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors"
             >

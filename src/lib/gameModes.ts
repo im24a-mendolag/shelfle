@@ -1,0 +1,26 @@
+export const GAME_MODES = [
+  {
+    label: "Classic",
+    path: "/play",
+    description: "Guess by tags, year, reviews & more",
+    accent: true,
+  },
+  {
+    label: "Zoom",
+    path: "/zoom",
+    description: "Guess from a progressively zoomed-out image",
+    accent: false,
+  },
+  {
+    label: "Higher/Lower",
+    path: "/higherlower",
+    description: "Higher or lower — year or price",
+    accent: false,
+  },
+  {
+    label: "Achievement",
+    path: "/achievement",
+    description: "Guess the game from one of its Steam achievements",
+    accent: false,
+  },
+] as const;

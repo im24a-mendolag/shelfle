@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { GAME_MODES } from "@/lib/gameModes";
 
-const MODES = [
-  { label: "Classic", href: "/play" },
-  { label: "Zoom", href: "/zoom" },
-  { label: "Higher/Lower", href: "/higherlower" },
+const NAV_LINKS = [
+  ...GAME_MODES.map((m) => ({ label: m.label, href: m.path })),
   { label: "Library", href: "/library" },
 ];
 
@@ -15,7 +14,7 @@ export default function NavLinks() {
 
   return (
     <nav className="flex items-center gap-1">
-      {MODES.map(({ label, href }) => {
+      {NAV_LINKS.map(({ label, href }) => {
         const active = pathname === href || pathname.startsWith(href + "?");
         return (
           <Link

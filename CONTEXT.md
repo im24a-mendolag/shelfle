@@ -146,26 +146,9 @@ const round = await db.round.findFirst({
 
 ## Navigation
 
-`src/components/NavLinks.tsx` has a `GAME_MODES` array — **add your new mode here**:
+All game modes are registered in **`src/lib/gameModes.ts`** — add your mode there once and it automatically appears in the navbar, the friends "Play" dropdown, and the home page cards.
 
-```ts
-const MODES = [
-  { label: "Classic", href: "/play" },
-  { label: "Zoom", href: "/zoom" },
-  { label: "YourMode", href: "/yourmode" },   // ← add here
-  { label: "Library", href: "/library" },
-];
-```
-
-`src/components/FriendsList.tsx` has a `GAME_MODES` array for the "Play" dropdown on friends — **also add here**:
-
-```ts
-const GAME_MODES = [
-  { label: "Classic", href: (f) => `/play?friend=...` },
-  { label: "Zoom",    href: (f) => `/zoom?friend=...` },
-  { label: "YourMode", href: (f) => `/yourmode?friend=...` },  // ← add here
-];
-```
+See `ADDING_A_GAME_MODE.md` for the full step-by-step guide.
 
 ---
 
