@@ -81,7 +81,7 @@ export async function GET() {
   const compareMode: "year" | "price" | "players" = init.compareMode ?? "year";
 
   let leftGame: HLGame;
-  let rightGame: Omit<HLGame, "releaseYear" | "priceChfCents">;
+  let rightGame: Omit<HLGame, "releaseYear" | "priceChfCents" | "avgPlayers24h">;
   let score: number;
 
   if (!last) {
