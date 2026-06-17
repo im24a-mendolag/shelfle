@@ -6,29 +6,29 @@ import { db } from "@/lib/db";
 import { syncUser, syncLibrary } from "@/lib/steam/sync";
 import { resolveSteamId, getSteamProfile } from "@/lib/steam/api";
 
-type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null };
+type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null; avgPlayers24h: number | null };
 
 type InitRecord = {
   type: "init";
-  compareMode?: "year" | "price";
-  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null;
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
+  compareMode?: "year" | "price" | "players";
+  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null; leftPlayers: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
 };
 
 type GuessRecord = {
   type: "guess";
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
-  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
+  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null; nextRightPlayers?: number | null;
   outcome: "correct" | "wrong" | "tie";
   score: number;
 };
 
-async function pickPool(userId: string, compareMode: "year" | "price"): Promise<HLGame[]> {
+async function pickPool(userId: string, compareMode: "year" | "price" | "players"): Promise<HLGame[]> {
   const rows = await db.userGame.findMany({
     where: { userId },
     include: {
       game: {
-        select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true },
+        select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true, avgPlayers24h: true },
       },
     },
   });
@@ -39,7 +39,8 @@ async function pickPool(userId: string, compareMode: "year" | "price"): Promise<
         ug.game.tags.length > 0 &&
         ug.game.releaseYear !== null &&
         ug.game.reviewPct !== null &&
-        (compareMode !== "price" || (ug.game.priceChfCents !== null && ug.game.priceChfCents > 0)),
+        (compareMode !== "price" || (ug.game.priceChfCents !== null && ug.game.priceChfCents > 0)) &&
+        (compareMode !== "players" || (ug.game.avgPlayers24h !== null && ug.game.avgPlayers24h > 0)),
     )
     .map((ug) => ({
       steamAppId: ug.game.steamAppId,
@@ -47,6 +48,7 @@ async function pickPool(userId: string, compareMode: "year" | "price"): Promise<
       headerImage: ug.game.headerImage,
       releaseYear: ug.game.releaseYear as number,
       priceChfCents: ug.game.priceChfCents,
+      avgPlayers24h: ug.game.avgPlayers24h,
     }));
 }
 
@@ -76,18 +78,18 @@ export async function GET() {
   const realGuesses = all.slice(1) as GuessRecord[];
   const last = realGuesses[realGuesses.length - 1];
 
-  const compareMode: "year" | "price" = init.compareMode ?? "year";
+  const compareMode: "year" | "price" | "players" = init.compareMode ?? "year";
 
   let leftGame: HLGame;
   let rightGame: Omit<HLGame, "releaseYear" | "priceChfCents">;
   let score: number;
 
   if (!last) {
-    leftGame = { steamAppId: init.leftAppId, title: init.leftTitle, headerImage: init.leftImage, releaseYear: init.leftYear, priceChfCents: init.leftPrice ?? null };
+    leftGame = { steamAppId: init.leftAppId, title: init.leftTitle, headerImage: init.leftImage, releaseYear: init.leftYear, priceChfCents: init.leftPrice ?? null, avgPlayers24h: init.leftPlayers ?? null };
     rightGame = { steamAppId: init.rightAppId, title: init.rightTitle, headerImage: init.rightImage };
     score = 0;
   } else {
-    leftGame = { steamAppId: last.rightAppId, title: last.rightTitle, headerImage: last.rightImage, releaseYear: last.rightYear, priceChfCents: last.rightPrice ?? null };
+    leftGame = { steamAppId: last.rightAppId, title: last.rightTitle, headerImage: last.rightImage, releaseYear: last.rightYear, priceChfCents: last.rightPrice ?? null, avgPlayers24h: last.rightPlayers ?? null };
     rightGame = { steamAppId: last.nextRightAppId!, title: last.nextRightTitle!, headerImage: last.nextRightImage! };
     score = last.score;
   }
@@ -120,7 +122,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const friendInput: string | undefined = body.friendSteamId;
-  const compareMode: "year" | "price" = body.compareMode === "price" ? "price" : "year";
+  const compareMode: "year" | "price" | "players" = body.compareMode === "price" ? "price" : body.compareMode === "players" ? "players" : "year";
   let targetUser = user;
 
   if (friendInput) {
@@ -172,8 +174,8 @@ export async function POST(req: NextRequest) {
   const init: InitRecord = {
     type: "init",
     compareMode,
-    leftAppId: leftGame.steamAppId, leftTitle: leftGame.title, leftImage: leftGame.headerImage, leftYear: leftGame.releaseYear, leftPrice: leftGame.priceChfCents,
-    rightAppId: rightGame.steamAppId, rightTitle: rightGame.title, rightImage: rightGame.headerImage, rightYear: rightGame.releaseYear, rightPrice: rightGame.priceChfCents,
+    leftAppId: leftGame.steamAppId, leftTitle: leftGame.title, leftImage: leftGame.headerImage, leftYear: leftGame.releaseYear, leftPrice: leftGame.priceChfCents, leftPlayers: leftGame.avgPlayers24h,
+    rightAppId: rightGame.steamAppId, rightTitle: rightGame.title, rightImage: rightGame.headerImage, rightYear: rightGame.releaseYear, rightPrice: rightGame.priceChfCents, rightPlayers: rightGame.avgPlayers24h,
   };
 
   await db.guess.create({
@@ -186,7 +188,7 @@ export async function POST(req: NextRequest) {
       status: "active",
       score: 0,
       compareMode,
-      leftGame: { steamAppId: leftGame.steamAppId, title: leftGame.title, headerImage: leftGame.headerImage, releaseYear: leftGame.releaseYear, priceChfCents: leftGame.priceChfCents },
+      leftGame: { steamAppId: leftGame.steamAppId, title: leftGame.title, headerImage: leftGame.headerImage, releaseYear: leftGame.releaseYear, priceChfCents: leftGame.priceChfCents, avgPlayers24h: leftGame.avgPlayers24h },
       rightGame: { steamAppId: rightGame.steamAppId, title: rightGame.title, headerImage: rightGame.headerImage },
       friendName: friendInput ? targetUser.displayName : undefined,
     },
