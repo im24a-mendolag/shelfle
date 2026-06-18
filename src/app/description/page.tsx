@@ -93,10 +93,11 @@ export default async function DescriptionPage({
 
   // Shuffle and find a game that has (or can fetch) a description
   const shuffled = candidates.sort(() => Math.random() - 0.5);
-  let chosenGame: (typeof shuffled)[0] & { shortDescription: string } | null = null;
+  type ChosenGame = (typeof shuffled)[0] & { shortDescription: string };
+  let chosenGame: ChosenGame | null = null;
   for (const candidate of shuffled.slice(0, 10)) {
     if (candidate.shortDescription) {
-      chosenGame = candidate as typeof chosenGame;
+      chosenGame = candidate as ChosenGame;
       break;
     }
     const desc = await getShortDescription(candidate.steamAppId);
