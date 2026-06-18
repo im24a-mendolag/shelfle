@@ -108,9 +108,9 @@ export default function HigherLowerClient({
   defaultFriendAvatar?: string;
   initialRound?: HLRound;
 }) {
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [round, setRound] = useState<HLRound | null>(null);
-  const [compareMode, setCompareMode] = useState<"year" | "price">("year");
+  const [phase, setPhase] = useState<Phase>(initialRound ? (initialRound.status === "lost" ? "lost" : "guessing") : "loading");
+  const [round, setRound] = useState<HLRound | null>(initialRound ?? null);
+  const [compareMode, setCompareMode] = useState<"year" | "price" | "players">(initialRound?.compareMode ?? "year");
   const [startError, setStartError] = useState("");
   const [loadingPct, setLoadingPct] = useState(15);
   const [loadingLabel, setLoadingLabel] = useState("Loading…");

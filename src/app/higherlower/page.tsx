@@ -7,19 +7,19 @@ import { resolveSteamId, getSteamProfile } from "@/lib/steam/api";
 import { db } from "@/lib/db";
 import HigherLowerClient from "@/components/game/HigherLowerClient";
 
-type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null };
+type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null; avgPlayers24h: number | null };
 
 type InitRecord = {
   type: "init";
-  compareMode?: "year" | "price";
-  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null;
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
+  compareMode?: "year" | "price" | "players";
+  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null; leftPlayers: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
 };
 
 type GuessRecord = {
   type: "guess";
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
-  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
+  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null; nextRightPlayers?: number | null;
   outcome: "correct" | "wrong" | "tie";
   score: number;
 };
@@ -27,11 +27,11 @@ type GuessRecord = {
 async function pickPool(userId: string): Promise<HLGame[]> {
   const rows = await db.userGame.findMany({
     where: { userId },
-    include: { game: { select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true } } },
+    include: { game: { select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true, avgPlayers24h: true } } },
   });
   return rows
     .filter((ug) => ug.game.headerImage !== "" && ug.game.tags.length > 0 && ug.game.releaseYear !== null && ug.game.reviewPct !== null)
-    .map((ug) => ({ steamAppId: ug.game.steamAppId, title: ug.game.title, headerImage: ug.game.headerImage, releaseYear: ug.game.releaseYear as number, priceChfCents: ug.game.priceChfCents }));
+    .map((ug) => ({ steamAppId: ug.game.steamAppId, title: ug.game.title, headerImage: ug.game.headerImage, releaseYear: ug.game.releaseYear as number, priceChfCents: ug.game.priceChfCents, avgPlayers24h: ug.game.avgPlayers24h }));
 }
 
 function pickFrom(pool: HLGame[], exclude: Set<number>): HLGame | null {
@@ -65,11 +65,11 @@ export default async function HigherLowerPage({
       const init = all[0] as InitRecord;
       const realGuesses = all.slice(1) as GuessRecord[];
       const last = realGuesses[realGuesses.length - 1];
-      const compareMode: "year" | "price" = init.compareMode ?? "year";
+      const compareMode: "year" | "price" | "players" = init.compareMode ?? "year";
 
       const leftGame: HLGame = last
-        ? { steamAppId: last.rightAppId, title: last.rightTitle, headerImage: last.rightImage, releaseYear: last.rightYear, priceChfCents: last.rightPrice ?? null }
-        : { steamAppId: init.leftAppId, title: init.leftTitle, headerImage: init.leftImage, releaseYear: init.leftYear, priceChfCents: init.leftPrice ?? null };
+        ? { steamAppId: last.rightAppId, title: last.rightTitle, headerImage: last.rightImage, releaseYear: last.rightYear, priceChfCents: last.rightPrice ?? null, avgPlayers24h: last.rightPlayers ?? null }
+        : { steamAppId: init.leftAppId, title: init.leftTitle, headerImage: init.leftImage, releaseYear: init.leftYear, priceChfCents: init.leftPrice ?? null, avgPlayers24h: init.leftPlayers ?? null };
       const rightGame = last
         ? { steamAppId: last.nextRightAppId!, title: last.nextRightTitle!, headerImage: last.nextRightImage! }
         : { steamAppId: init.rightAppId, title: init.rightTitle, headerImage: init.rightImage };
@@ -105,7 +105,7 @@ export default async function HigherLowerPage({
     }
   }
 
-  const compareMode: "year" | "price" = "year";
+  const compareMode: "year" | "price" | "players" = "year";
   const pool = await pickPool(targetUser.id);
   if (pool.length < 2) {
     return <HigherLowerClient defaultFriend={friend} defaultFriendName={resolvedFriendName} defaultFriendAvatar={friendAvatar} />;
@@ -121,8 +121,8 @@ export default async function HigherLowerPage({
   const init: InitRecord = {
     type: "init",
     compareMode,
-    leftAppId: leftGame.steamAppId, leftTitle: leftGame.title, leftImage: leftGame.headerImage, leftYear: leftGame.releaseYear, leftPrice: leftGame.priceChfCents,
-    rightAppId: rightGame.steamAppId, rightTitle: rightGame.title, rightImage: rightGame.headerImage, rightYear: rightGame.releaseYear, rightPrice: rightGame.priceChfCents,
+    leftAppId: leftGame.steamAppId, leftTitle: leftGame.title, leftImage: leftGame.headerImage, leftYear: leftGame.releaseYear, leftPrice: leftGame.priceChfCents, leftPlayers: leftGame.avgPlayers24h,
+    rightAppId: rightGame.steamAppId, rightTitle: rightGame.title, rightImage: rightGame.headerImage, rightYear: rightGame.releaseYear, rightPrice: rightGame.priceChfCents, rightPlayers: rightGame.avgPlayers24h,
   };
 
   await db.guess.create({ data: { roundId: round.id, guessedAppId: rightGame.steamAppId, resultJson: init as object } });
@@ -134,7 +134,7 @@ export default async function HigherLowerPage({
         status: "active",
         score: 0,
         compareMode,
-        leftGame: { steamAppId: leftGame.steamAppId, title: leftGame.title, headerImage: leftGame.headerImage, releaseYear: leftGame.releaseYear, priceChfCents: leftGame.priceChfCents },
+        leftGame: { steamAppId: leftGame.steamAppId, title: leftGame.title, headerImage: leftGame.headerImage, releaseYear: leftGame.releaseYear, priceChfCents: leftGame.priceChfCents, avgPlayers24h: leftGame.avgPlayers24h },
         rightGame: { steamAppId: rightGame.steamAppId, title: rightGame.title, headerImage: rightGame.headerImage },
         friendName: friend ? resolvedFriendName : undefined,
       }}
