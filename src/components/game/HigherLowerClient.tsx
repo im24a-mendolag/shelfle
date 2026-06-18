@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from "react";
 
-type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null };
+type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null; avgPlayers24h: number | null };
 type HLRightGame = { steamAppId: number; title: string; headerImage: string };
 
 type HLRound = {
   id: string;
   status: "active" | "lost";
   score: number;
-  compareMode: "year" | "price";
+  compareMode: "year" | "price" | "players";
   leftGame: HLGame;
   rightGame: HLRightGame;
   friendName?: string;
@@ -17,8 +17,17 @@ type HLRound = {
 
 type Phase = "loading" | "guessing" | "revealing" | "lost";
 
-function formatValue(mode: "year" | "price", year: number, price: number | null | undefined): string {
+function formatPlayers(v: number | null | undefined): string {
+  if (v === undefined) return "???";
+  if (v === null) return "No data";
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}k`;
+  return String(v);
+}
+
+function formatValue(mode: "year" | "price" | "players", year: number, price: number | null | undefined, players: number | null | undefined): string {
   if (mode === "year") return String(year);
+  if (mode === "players") return formatPlayers(players);
   if (price === undefined) return "???";
   if (price === null) return "No data";
   if (price === 0) return "Free";
@@ -99,9 +108,9 @@ export default function HigherLowerClient({
   defaultFriendAvatar?: string;
   initialRound?: HLRound;
 }) {
-  const [phase, setPhase] = useState<Phase>(initialRound ? (initialRound.status === "lost" ? "lost" : "guessing") : "loading");
-  const [round, setRound] = useState<HLRound | null>(initialRound ?? null);
-  const [compareMode, setCompareMode] = useState<"year" | "price">(initialRound?.compareMode ?? "year");
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [round, setRound] = useState<HLRound | null>(null);
+  const [compareMode, setCompareMode] = useState<"year" | "price">("year");
   const [startError, setStartError] = useState("");
   const [loadingPct, setLoadingPct] = useState(15);
   const [loadingLabel, setLoadingLabel] = useState("Loading…");
@@ -110,6 +119,7 @@ export default function HigherLowerClient({
 
   const [revealedYear, setRevealedYear] = useState<number | null>(null);
   const [revealedPrice, setRevealedPrice] = useState<number | null | undefined>(undefined);
+  const [revealedPlayers, setRevealedPlayers] = useState<number | null | undefined>(undefined);
   const [revealOutcome, setRevealOutcome] = useState<"correct" | "wrong" | "tie" | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -141,6 +151,7 @@ export default function HigherLowerClient({
     setStartError("");
     setRevealedYear(null);
     setRevealedPrice(undefined);
+    setRevealedPlayers(undefined);
     setRevealOutcome(null);
 
     const isFriend = !!defaultFriend;
@@ -209,6 +220,7 @@ export default function HigherLowerClient({
 
     setRevealedYear(d.rightYear);
     setRevealedPrice(d.rightPrice ?? null);
+    setRevealedPlayers(d.rightPlayers ?? null);
     setRevealOutcome(d.outcome);
     setPhase("revealing");
     setSubmitting(false);
@@ -226,6 +238,7 @@ export default function HigherLowerClient({
         );
         setRevealedYear(null);
         setRevealedPrice(undefined);
+        setRevealedPlayers(undefined);
         setRevealOutcome(null);
         setPhase("guessing");
       }
@@ -238,12 +251,12 @@ export default function HigherLowerClient({
 
   function leftLabel(): string {
     if (!round) return "???";
-    return formatValue(activeMode, round.leftGame.releaseYear, round.leftGame.priceChfCents);
+    return formatValue(activeMode, round.leftGame.releaseYear, round.leftGame.priceChfCents, round.leftGame.avgPlayers24h);
   }
 
   function rightLabel(): string {
     if (revealedYear === null || (phase !== "revealing" && phase !== "lost")) return "???";
-    return formatValue(activeMode, revealedYear, revealedPrice);
+    return formatValue(activeMode, revealedYear, revealedPrice, revealedPlayers);
   }
 
   return (
@@ -292,6 +305,14 @@ export default function HigherLowerClient({
                   }`}
                 >
                   Price
+                </button>
+                <button
+                  onClick={() => setCompareMode("players")}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    compareMode === "players" ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+                  }`}
+                >
+                  Players
                 </button>
               </div>
               {compareMode !== activeMode && phase !== "lost" && (

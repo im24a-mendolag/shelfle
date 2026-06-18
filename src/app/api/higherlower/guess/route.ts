@@ -5,19 +5,19 @@ import { db } from "@/lib/db";
 
 type InitRecord = {
   type: "init";
-  compareMode?: "year" | "price";
-  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null;
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
+  compareMode?: "year" | "price" | "players";
+  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null; leftPlayers: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
 };
 
 type GuessRecord = {
   type: "guess";
-  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null;
-  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null;
+  leftAppId: number; leftTitle: string; leftImage: string; leftYear: number; leftPrice: number | null; leftPlayers: number | null;
+  rightAppId: number; rightTitle: string; rightImage: string; rightYear: number; rightPrice: number | null; rightPlayers: number | null;
   playerAnswer: "higher" | "lower";
   outcome: "correct" | "wrong" | "tie";
   score: number;
-  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null;
+  nextRightAppId?: number; nextRightTitle?: string; nextRightImage?: string; nextRightYear?: number; nextRightPrice?: number | null; nextRightPlayers?: number | null;
 };
 
 export async function POST(req: NextRequest) {
@@ -48,22 +48,24 @@ export async function POST(req: NextRequest) {
   const realGuesses = all.slice(1) as GuessRecord[];
   const last = realGuesses[realGuesses.length - 1];
 
-  const compareMode: "year" | "price" = init.compareMode ?? "year";
+  const compareMode: "year" | "price" | "players" = init.compareMode ?? "year";
 
-  let leftAppId: number, leftTitle: string, leftImage: string, leftYear: number, leftPrice: number | null;
-  let rightAppId: number, rightTitle: string, rightImage: string, rightYear: number, rightPrice: number | null;
+  let leftAppId: number, leftTitle: string, leftImage: string, leftYear: number, leftPrice: number | null, leftPlayers: number | null;
+  let rightAppId: number, rightTitle: string, rightImage: string, rightYear: number, rightPrice: number | null, rightPlayers: number | null;
   let currentScore: number;
 
   if (!last) {
-    ({ leftAppId, leftTitle, leftImage, leftYear, leftPrice, rightAppId, rightTitle, rightImage, rightYear, rightPrice } = {
+    ({ leftAppId, leftTitle, leftImage, leftYear, leftPrice, leftPlayers, rightAppId, rightTitle, rightImage, rightYear, rightPrice, rightPlayers } = {
       ...init,
       leftPrice: init.leftPrice ?? null,
       rightPrice: init.rightPrice ?? null,
+      leftPlayers: init.leftPlayers ?? null,
+      rightPlayers: init.rightPlayers ?? null,
     });
     currentScore = 0;
   } else {
-    leftAppId = last.rightAppId; leftTitle = last.rightTitle; leftImage = last.rightImage; leftYear = last.rightYear; leftPrice = last.rightPrice ?? null;
-    rightAppId = last.nextRightAppId!; rightTitle = last.nextRightTitle!; rightImage = last.nextRightImage!; rightYear = last.nextRightYear!; rightPrice = last.nextRightPrice ?? null;
+    leftAppId = last.rightAppId; leftTitle = last.rightTitle; leftImage = last.rightImage; leftYear = last.rightYear; leftPrice = last.rightPrice ?? null; leftPlayers = last.rightPlayers ?? null;
+    rightAppId = last.nextRightAppId!; rightTitle = last.nextRightTitle!; rightImage = last.nextRightImage!; rightYear = last.nextRightYear!; rightPrice = last.nextRightPrice ?? null; rightPlayers = last.nextRightPlayers ?? null;
     currentScore = last.score;
   }
 
@@ -77,6 +79,14 @@ export async function POST(req: NextRequest) {
     } else {
       outcome = (playerAnswer === "higher") === (rightPrice > leftPrice) ? "correct" : "wrong";
     }
+  } else if (compareMode === "players") {
+    if (leftPlayers === null || rightPlayers === null) {
+      outcome = "tie";
+    } else if (rightPlayers === leftPlayers) {
+      outcome = "tie";
+    } else {
+      outcome = (playerAnswer === "higher") === (rightPlayers > leftPlayers) ? "correct" : "wrong";
+    }
   } else {
     if (rightYear === leftYear) {
       outcome = "tie";
@@ -87,7 +97,7 @@ export async function POST(req: NextRequest) {
 
   const newScore = outcome === "correct" ? currentScore + 1 : currentScore;
 
-  let nextGame: { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null } | null = null;
+  let nextGame: { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null; avgPlayers24h: number | null } | null = null;
 
   if (outcome !== "wrong") {
     const shownIds = new Set<number>([init.leftAppId, init.rightAppId]);
@@ -101,7 +111,7 @@ export async function POST(req: NextRequest) {
       where: { userId: round.targetUserId },
       include: {
         game: {
-          select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true },
+          select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, priceChfCents: true, avgPlayers24h: true },
         },
       },
     });
@@ -111,7 +121,8 @@ export async function POST(req: NextRequest) {
       ug.game.tags.length > 0 &&
       ug.game.releaseYear !== null &&
       ug.game.reviewPct !== null &&
-      (compareMode !== "price" || (ug.game.priceChfCents !== null && ug.game.priceChfCents > 0));
+      (compareMode !== "price" || (ug.game.priceChfCents !== null && ug.game.priceChfCents > 0)) &&
+      (compareMode !== "players" || (ug.game.avgPlayers24h !== null && ug.game.avgPlayers24h > 0));
 
     const eligible = pool.filter((ug) => !shownIds.has(ug.game.steamAppId) && isEligible(ug));
     const candidates = eligible.length > 0
@@ -126,19 +137,20 @@ export async function POST(req: NextRequest) {
         headerImage: pick.game.headerImage,
         releaseYear: pick.game.releaseYear as number,
         priceChfCents: pick.game.priceChfCents,
+        avgPlayers24h: pick.game.avgPlayers24h,
       };
     }
   }
 
   const resultJson: GuessRecord = {
     type: "guess",
-    leftAppId, leftTitle, leftImage, leftYear, leftPrice,
-    rightAppId, rightTitle, rightImage, rightYear, rightPrice,
+    leftAppId, leftTitle, leftImage, leftYear, leftPrice, leftPlayers,
+    rightAppId, rightTitle, rightImage, rightYear, rightPrice, rightPlayers,
     playerAnswer,
     outcome,
     score: newScore,
     ...(nextGame
-      ? { nextRightAppId: nextGame.steamAppId, nextRightTitle: nextGame.title, nextRightImage: nextGame.headerImage, nextRightYear: nextGame.releaseYear, nextRightPrice: nextGame.priceChfCents }
+      ? { nextRightAppId: nextGame.steamAppId, nextRightTitle: nextGame.title, nextRightImage: nextGame.headerImage, nextRightYear: nextGame.releaseYear, nextRightPrice: nextGame.priceChfCents, nextRightPlayers: nextGame.avgPlayers24h }
       : {}),
   };
 
@@ -154,12 +166,13 @@ export async function POST(req: NextRequest) {
     outcome,
     rightYear,
     rightPrice,
+    rightPlayers,
     score: newScore,
     roundStatus: outcome === "wrong" ? "lost" : "active",
     ...(outcome !== "wrong" && nextGame
       ? {
           nextGame: { steamAppId: nextGame.steamAppId, title: nextGame.title, headerImage: nextGame.headerImage },
-          newLeft: { steamAppId: rightAppId, title: rightTitle, headerImage: rightImage, releaseYear: rightYear, priceChfCents: rightPrice },
+          newLeft: { steamAppId: rightAppId, title: rightTitle, headerImage: rightImage, releaseYear: rightYear, priceChfCents: rightPrice, avgPlayers24h: rightPlayers },
         }
       : {}),
   });
