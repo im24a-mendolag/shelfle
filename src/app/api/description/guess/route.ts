@@ -2,8 +2,8 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { authCallbacks } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import type { InitRecord, GuessRecord, DescriptionRound } from "../route";
-import { buildRound } from "../route";
+import type { InitRecord, GuessRecord, DescriptionRound } from "@/lib/description";
+import { buildRound } from "@/lib/description";
 
 const MAX_GUESSES = 3;
 

@@ -6,8 +6,8 @@ import { syncUser, syncLibrary } from "@/lib/steam/sync";
 import { resolveSteamId, getSteamProfile, getShortDescription } from "@/lib/steam/api";
 import { db } from "@/lib/db";
 import DescriptionClient from "@/components/game/DescriptionClient";
-import type { InitRecord, GuessRecord } from "@/app/api/description/route";
-import { buildRound, redactTitle } from "@/app/api/description/route";
+import type { InitRecord, GuessRecord } from "@/lib/description";
+import { buildRound, redactTitle } from "@/lib/description";
 
 export default async function DescriptionPage({
   searchParams,
