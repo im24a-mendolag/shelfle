@@ -2,23 +2,21 @@
 
 import { useState, useEffect, useRef } from "react";
 
-type AchievementGuess = {
+type DescriptionGuess = {
   guessedAppId: number;
   title: string;
   headerImage: string;
   won: boolean;
 };
 
-type AchievementRound = {
+type DescriptionRound = {
   id: string;
   status: "active" | "won" | "lost";
-  guesses: AchievementGuess[];
-  maxGuesses: 5;
-  clueLevel: 0 | 1 | 2 | 3;
-  achievementName: string;
-  achievementIconUrl?: string;
-  achievementPercent?: number;
-  achievementDescription?: string;
+  guesses: DescriptionGuess[];
+  maxGuesses: 3;
+  shortDescription: string;
+  firstLetter?: string;
+  releaseYear?: number;
   targetTitle?: string;
   targetHeaderImage?: string;
   friendName?: string;
@@ -41,61 +39,46 @@ function LoadingBar({ pct, label }: { pct: number; label: string }) {
   );
 }
 
-function reveals(n: number) {
-  return `reveals in ${n} guess${n === 1 ? "" : "es"}`;
-}
-
-function AchievementCard({ round }: { round: AchievementRound }) {
-  const hasIcon = !!round.achievementIconUrl;
-  const hasDesc = !!round.achievementDescription;
-  const hasPct = round.achievementPercent !== undefined;
-  const isActive = round.status === "active";
-
+function DescriptionCard({ round }: { round: DescriptionRound }) {
   const wrongCount = round.guesses.filter((g) => !g.won).length;
-  const iconRevealIn = !hasIcon && isActive ? 2 - wrongCount : null;
-  const pctRevealIn = !hasPct && isActive ? 3 - wrongCount : null;
-  const descRevealIn = !hasDesc && isActive ? 4 - wrongCount : null;
+  const isActive = round.status === "active";
 
   return (
     <div className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden mb-5">
-      <div className="flex items-center gap-4 p-4">
-        {hasIcon ? (
-          <div className="flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden ring-2 ring-blue-700 ring-offset-2 ring-offset-gray-900 shadow-[0_0_12px_rgba(59,130,246,0.4)]">
-            <img src={round.achievementIconUrl} alt="" className="w-full h-full object-cover" />
-          </div>
-        ) : (
-          <div className="flex-shrink-0 w-16 h-16 rounded-lg bg-gray-800 ring-2 ring-gray-700 flex flex-col items-center justify-center gap-0.5">
-            <span className="text-xl text-gray-500">?</span>
-            {iconRevealIn !== null && (
-              <span className="text-gray-500 text-[10px] text-center leading-tight px-1">{reveals(iconRevealIn)}</span>
-            )}
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <p className="text-white font-semibold text-base leading-snug">{round.achievementName}</p>
-          {hasDesc ? (
-            <p className="text-gray-400 text-sm mt-0.5 leading-snug">{round.achievementDescription}</p>
-          ) : descRevealIn !== null && (
-            <p className="text-gray-500 text-xs mt-0.5">description {reveals(descRevealIn)}</p>
+      <div className="p-4 pb-3">
+        <p className="text-gray-200 text-sm leading-relaxed italic">&ldquo;{round.shortDescription}&rdquo;</p>
+      </div>
+
+      <div className="px-4 pb-4 flex items-center gap-6">
+        {/* First letter — revealed after 1 wrong guess */}
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-gray-500 mb-1">Starts with</span>
+          {round.firstLetter ? (
+            <span className="w-10 h-10 flex items-center justify-center rounded-lg bg-blue-900 text-blue-200 text-xl font-bold">
+              {round.firstLetter}
+            </span>
+          ) : (
+            <span className="w-10 h-10 flex items-center justify-center rounded-lg bg-gray-800 text-gray-600 text-xl font-bold">
+              ?
+            </span>
+          )}
+        </div>
+
+        {/* Release year — revealed after 2 wrong guesses */}
+        <div className="flex flex-col items-center">
+          <span className="text-xs text-gray-500 mb-1">Released</span>
+          {round.releaseYear !== undefined ? (
+            <span className="text-yellow-400 font-semibold">{round.releaseYear}</span>
+          ) : (
+            <span className="text-gray-600 font-semibold">????</span>
           )}
         </div>
       </div>
-      {hasPct ? (
-        <div className="px-4 pb-3">
-          <p className="text-yellow-500 text-xs font-medium">
-            {round.achievementPercent!.toFixed(1)}% of players have this achievement
-          </p>
-        </div>
-      ) : pctRevealIn !== null && (
-        <div className="px-4 pb-3">
-          <p className="text-gray-500 text-xs">rarity {reveals(pctRevealIn)}</p>
-        </div>
-      )}
     </div>
   );
 }
 
-export default function AchievementClient({
+export default function DescriptionClient({
   defaultFriend,
   defaultFriendName,
   defaultFriendAvatar,
@@ -104,9 +87,9 @@ export default function AchievementClient({
   defaultFriend?: string;
   defaultFriendName?: string;
   defaultFriendAvatar?: string;
-  initialRound?: AchievementRound;
+  initialRound?: DescriptionRound;
 }) {
-  const [round, setRound] = useState<AchievementRound | null>(initialRound ?? null);
+  const [round, setRound] = useState<DescriptionRound | null>(initialRound ?? null);
   const [loading, setLoading] = useState(!initialRound);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
@@ -128,7 +111,7 @@ export default function AchievementClient({
       startGame();
       return;
     }
-    fetch("/api/achievement")
+    fetch("/api/description")
       .then((r) => r.json())
       .then((d) => {
         const r = d.round;
@@ -166,12 +149,11 @@ export default function AchievementClient({
           { delay: 0,     pct: 8,  label: "Resolving Steam profile…" },
           { delay: 2000,  pct: 28, label: "Syncing friend's profile…" },
           { delay: 5000,  pct: 52, label: "Importing library…" },
-          { delay: 11000, pct: 72, label: "Fetching achievement data…" },
-          { delay: 19000, pct: 88, label: "Almost there…" },
+          { delay: 11000, pct: 75, label: "Almost there…" },
         ]
       : [
           { delay: 0,   pct: 25, label: "Loading your library…" },
-          { delay: 700, pct: 65, label: "Picking an achievement…" },
+          { delay: 700, pct: 65, label: "Picking a description…" },
         ];
 
     loadingTimers.current.forEach(clearTimeout);
@@ -183,7 +165,7 @@ export default function AchievementClient({
     });
 
     const body = defaultFriend ? { friendSteamId: defaultFriend } : {};
-    const r = await fetch("/api/achievement", {
+    const r = await fetch("/api/description", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -219,7 +201,7 @@ export default function AchievementClient({
     setResults([]);
     setDropdownOpen(false);
 
-    const r = await fetch("/api/achievement/guess", {
+    const r = await fetch("/api/description/guess", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ guessedAppId: game.steamAppId }),
@@ -237,7 +219,7 @@ export default function AchievementClient({
 
   return (
     <main className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
-      {!round ? (
+      {!round || (loading && !starting) ? (
         <div className="flex flex-col items-center gap-4 py-20 max-w-sm mx-auto w-full">
           {startError ? (
             <>
@@ -253,6 +235,10 @@ export default function AchievementClient({
             <LoadingBar pct={loadingPct} label={loadingLabel} />
           )}
         </div>
+      ) : starting ? (
+        <div className="flex flex-col items-center gap-4 py-20 max-w-sm mx-auto w-full">
+          <LoadingBar pct={loadingPct} label={loadingLabel} />
+        </div>
       ) : (
         <>
           {/* Header row: friend badge + guess dots */}
@@ -264,16 +250,16 @@ export default function AchievementClient({
                   {friendName}&apos;s library
                 </span>
               )}
-              {round.status !== "active" && (
+              {round!.status !== "active" && (
                 <span className="text-sm text-gray-400">
-                  {round.status === "won"
+                  {round!.status === "won"
                     ? `Got it in ${guessCount} guess${guessCount === 1 ? "" : "es"}!`
                     : "Out of guesses"}
                 </span>
               )}
             </div>
             <div className="flex items-center gap-3">
-              {round.status === "active" && (
+              {round!.status === "active" && (
                 <button
                   onClick={() => startGame()}
                   className="text-xs text-gray-500 hover:text-white transition-colors"
@@ -282,12 +268,12 @@ export default function AchievementClient({
                 </button>
               )}
               <div className="flex gap-1">
-                {Array.from({ length: round.maxGuesses }).map((_, i) => (
+                {Array.from({ length: round!.maxGuesses }).map((_, i) => (
                   <div
                     key={i}
                     className={`w-3 h-3 rounded-full ${
                       i < guessCount
-                        ? round.guesses[i].won ? "bg-green-500" : "bg-red-700"
+                        ? round!.guesses[i].won ? "bg-green-500" : "bg-red-700"
                         : "bg-gray-700"
                     }`}
                   />
@@ -296,30 +282,30 @@ export default function AchievementClient({
             </div>
           </div>
 
-          {/* Achievement card */}
-          <AchievementCard round={round} />
+          {/* Description card */}
+          <DescriptionCard round={round!} />
 
           {/* Answer reveal on game over */}
-          {round.status !== "active" && round.targetHeaderImage && (
-            <div className={`rounded-xl overflow-hidden border mb-4 ${round.status === "won" ? "border-green-700 bg-green-950" : "border-gray-700 bg-gray-900"}`}>
+          {round!.status !== "active" && round!.targetHeaderImage && (
+            <div className={`rounded-xl overflow-hidden border mb-4 ${round!.status === "won" ? "border-green-700 bg-green-950" : "border-gray-700 bg-gray-900"}`}>
               <img
-                src={round.targetHeaderImage}
-                alt={round.targetTitle ?? ""}
+                src={round!.targetHeaderImage}
+                alt={round!.targetTitle ?? ""}
                 className="w-full object-cover"
                 style={{ maxHeight: 180 }}
               />
               <div className="px-4 py-3">
                 <p className="font-semibold text-white text-base">
-                  {round.status === "won"
-                    ? `Correct! It was ${round.targetTitle}`
-                    : `The answer was: ${round.targetTitle}`}
+                  {round!.status === "won"
+                    ? `Correct! It was ${round!.targetTitle}`
+                    : `The answer was: ${round!.targetTitle}`}
                 </p>
               </div>
             </div>
           )}
 
           {/* Search input */}
-          {round.status === "active" && (
+          {round!.status === "active" && (
             <div className="relative mb-4">
               <input
                 ref={inputRef}
@@ -354,9 +340,9 @@ export default function AchievementClient({
           )}
 
           {/* Guess history */}
-          {round.guesses.length > 0 && (
+          {round!.guesses.length > 0 && (
             <div className="flex flex-col gap-2 mb-4">
-              {round.guesses.map((g) => (
+              {round!.guesses.map((g) => (
                 <div
                   key={g.guessedAppId}
                   className={`flex items-center gap-3 px-4 py-2 rounded-lg ${
@@ -378,7 +364,7 @@ export default function AchievementClient({
           )}
 
           {/* Play again */}
-          {round.status !== "active" && (
+          {round!.status !== "active" && (
             <div className="flex gap-3">
               <button
                 onClick={startGame}

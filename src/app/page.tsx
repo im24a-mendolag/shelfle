@@ -39,7 +39,7 @@ export default async function Home() {
   ]);
 
   return (
-    <main className="max-w-4xl mx-auto px-4 sm:px-6 py-10">
+    <main className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
 
       {/* Stats row */}
       {stats && (stats.roundsPlayed > 0) && (
@@ -55,62 +55,71 @@ export default async function Home() {
         </div>
       )}
 
-      {/* Mode cards */}
-      {(() => {
-        const footerText: Record<string, string> = {
-          "/play": `${enrichedCount.toLocaleString()} games ready`,
-          "/zoom": `${gameCount.toLocaleString()} games in your library`,
-        };
-        return (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-            {GAME_MODES.map((mode) => (
-              <Link
-                key={mode.path}
-                href={mode.path}
-                className={`group flex flex-col gap-2 rounded-2xl px-6 py-6 transition-colors ${
-                  mode.accent
-                    ? "bg-blue-600 hover:bg-blue-500"
-                    : "bg-gray-900 border border-gray-800 hover:border-gray-600"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold">{mode.label}</h2>
-                  <span className={`text-2xl transition-transform ${mode.accent ? "text-blue-200 group-hover:translate-x-1" : "text-gray-500 group-hover:text-white"}`}>→</span>
-                </div>
-                <p className={`text-sm ${mode.accent ? "text-blue-200" : "text-gray-400"}`}>
-                  {mode.description}
-                </p>
-                {footerText[mode.path] && (
-                  <p className={`text-xs mt-auto pt-2 border-t ${mode.accent ? "text-blue-300 border-blue-500" : "text-gray-600 border-gray-800"}`}>
-                    {footerText[mode.path]}
-                  </p>
-                )}
-              </Link>
-            ))}
-          </div>
-        );
-      })()}
+      {/* Two-column layout */}
+      <div className="flex flex-col lg:flex-row gap-10">
 
-      {/* Friends section */}
-      <section>
-        <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-3">
-          {friends.length > 0 ? `Friends (${friends.length})` : "Play a friend's library"}
-        </h3>
-        {friends.length > 0 ? (
-          <>
-            <FriendsList friends={friends} />
-            <div className="mt-4 pt-4 border-t border-gray-800">
-              <p className="text-gray-500 text-xs mb-2">Or enter a Steam ID / URL directly</p>
-              <FriendLibraryInput mode="both" />
-            </div>
-          </>
-        ) : (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4 max-w-sm">
-            <p className="text-gray-400 text-sm mb-3">Enter a Steam ID, vanity URL, or profile URL.</p>
-            <FriendLibraryInput mode="both" />
-          </div>
-        )}
-      </section>
+        {/* Left: Mode cards */}
+        <div className="flex-1 min-w-0">
+          {(() => {
+            const footerText: Record<string, string> = {
+              "/play": `${enrichedCount.toLocaleString()} games ready`,
+              "/zoom": `${gameCount.toLocaleString()} games in your library`,
+            };
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {GAME_MODES.map((mode) => (
+                  <Link
+                    key={mode.path}
+                    href={mode.path}
+                    className={`group flex flex-col gap-2 rounded-2xl px-6 py-8 transition-colors ${
+                      mode.accent
+                        ? "bg-blue-600 hover:bg-blue-500"
+                        : "bg-gray-900 border border-gray-800 hover:border-gray-600"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-xl font-bold">{mode.label}</h2>
+                      <span className={`text-2xl transition-transform ${mode.accent ? "text-blue-200 group-hover:translate-x-1" : "text-gray-500 group-hover:text-white"}`}>→</span>
+                    </div>
+                    <p className={`text-sm ${mode.accent ? "text-blue-200" : "text-gray-400"}`}>
+                      {mode.description}
+                    </p>
+                    {footerText[mode.path] && (
+                      <p className={`text-xs mt-auto pt-2 border-t ${mode.accent ? "text-blue-300 border-blue-500" : "text-gray-600 border-gray-800"}`}>
+                        {footerText[mode.path]}
+                      </p>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Right: Friends section */}
+        <div className="w-full lg:w-[420px] lg:flex-none">
+          <section>
+            <h3 className="text-xs uppercase tracking-widest text-gray-500 mb-3">
+              {friends.length > 0 ? `Friends (${friends.length})` : "Play a friend's library"}
+            </h3>
+            {friends.length > 0 ? (
+              <>
+                <FriendsList friends={friends} />
+                <div className="mt-4 pt-4 border-t border-gray-800">
+                  <p className="text-gray-500 text-xs mb-2">Or enter a Steam ID / URL directly</p>
+                  <FriendLibraryInput mode="both" />
+                </div>
+              </>
+            ) : (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl px-5 py-4">
+                <p className="text-gray-400 text-sm mb-3">Enter a Steam ID, vanity URL, or profile URL.</p>
+                <FriendLibraryInput mode="both" />
+              </div>
+            )}
+          </section>
+        </div>
+
+      </div>
     </main>
   );
 }

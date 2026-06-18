@@ -90,12 +90,14 @@ Every mode follows the same structure. Use Classic + Zoom as templates.
 - Calls `getServerSession`, redirects to `/` if unauthenticated
 - Calls `syncUser` + `syncLibrary` to keep the library fresh
 - Reads `searchParams` for `friend`, `friendName`, `friendAvatar`
-- Renders `<YourModeClient defaultFriend=... defaultFriendName=... defaultFriendAvatar=... />`
+- **Creates the initial round server-side** (check for existing solo round to resume, or abandon + create new) and passes it as `initialRound` prop to the client
+- This eliminates the client-side loading bar on first load — the client mounts with a ready round
 
 ### 2. Client component (`src/components/game/YourModeClient.tsx`)
 - `"use client"` — handles all game state
-- On mount: calls `GET /api/<mode>` to restore an active round; if none found → auto-calls `startGame()`
-- `startGame()`: POSTs to `/api/<mode>`, shows a `<LoadingBar>` with staged progress labels
+- Accepts `initialRound?: YourRoundType` prop — if provided, skips all initial fetching and renders the game immediately
+- On mount (only if no `initialRound`): calls `GET /api/<mode>` to restore an active round; if none found → auto-calls `startGame()`
+- `startGame()`: POSTs to `/api/<mode>`, shows a `<LoadingBar>` with staged progress labels (used for "Play Again" after a round ends)
 - `submitGuess(game)`: POSTs to `/api/<mode>/guess`, updates round state from response
 - Uses `GET /api/game/search?q=` for the game search dropdown (shared across all modes)
 - No page header — the shared `<Navbar>` is injected by `layout.tsx`
@@ -103,16 +105,9 @@ Every mode follows the same structure. Use Classic + Zoom as templates.
 
 ### 3. API route (`src/app/api/<mode>/route.ts`)
 
-**GET** — restore active round:
-```ts
-const round = await db.round.findFirst({
-  where: { playerUserId: user.id, mode: "yourmode", status: "active" },
-  include: { guesses: true, game: true, target: true },
-  orderBy: { createdAt: "desc" },
-});
-```
+The GET is no longer called on initial page load (the server page handles that). It still exists as a fallback.
 
-**POST** — start new round:
+**POST** — start new round (called by `startGame()` for "Play Again"):
 1. Abandon all active rounds: `db.round.updateMany({ where: { playerUserId, status: "active" }, data: { status: "abandoned" } })`
 2. Parse `friendSteamId` from body (optional)
 3. If friend: `resolveSteamId()` → `getSteamProfile()` → `syncUser()` → `syncLibrary()` → `revalidateTag("library")` + `revalidateTag("game-search")`

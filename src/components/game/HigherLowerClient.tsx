@@ -92,14 +92,16 @@ export default function HigherLowerClient({
   defaultFriend,
   defaultFriendName,
   defaultFriendAvatar,
+  initialRound,
 }: {
   defaultFriend?: string;
   defaultFriendName?: string;
   defaultFriendAvatar?: string;
+  initialRound?: HLRound;
 }) {
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [round, setRound] = useState<HLRound | null>(null);
-  const [compareMode, setCompareMode] = useState<"year" | "price">("year");
+  const [phase, setPhase] = useState<Phase>(initialRound ? (initialRound.status === "lost" ? "lost" : "guessing") : "loading");
+  const [round, setRound] = useState<HLRound | null>(initialRound ?? null);
+  const [compareMode, setCompareMode] = useState<"year" | "price">(initialRound?.compareMode ?? "year");
   const [startError, setStartError] = useState("");
   const [loadingPct, setLoadingPct] = useState(15);
   const [loadingLabel, setLoadingLabel] = useState("Loading…");
@@ -115,6 +117,7 @@ export default function HigherLowerClient({
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    if (initialRound) return;
     if (defaultFriend) {
       startGame();
       return;

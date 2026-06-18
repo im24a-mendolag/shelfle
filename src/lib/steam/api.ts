@@ -352,6 +352,12 @@ export async function getGameAchievements(appId: number): Promise<AchievementInf
   }
 }
 
+/** Fetches the short_description for an app via the full appdetails endpoint. */
+export async function getShortDescription(appId: number): Promise<string | null> {
+  const details = await getAppDetails(appId);
+  return (details?.short_description as string) || null;
+}
+
 /** Returns a map of achievement API name → global unlock percentage. */
 export async function getAchievementPercentages(appId: number): Promise<Record<string, number>> {
   try {

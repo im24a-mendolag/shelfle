@@ -114,9 +114,9 @@ function LoadingBar({ pct, label }: { pct: number; label: string }) {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function GameClient({ defaultFriend, defaultFriendName, defaultFriendAvatar }: { defaultFriend?: string; defaultFriendName?: string; defaultFriendAvatar?: string }) {
-  const [round, setRound] = useState<Round | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function GameClient({ defaultFriend, defaultFriendName, defaultFriendAvatar, initialRound }: { defaultFriend?: string; defaultFriendName?: string; defaultFriendAvatar?: string; initialRound?: Round }) {
+  const [round, setRound] = useState<Round | null>(initialRound ?? null);
+  const [loading, setLoading] = useState(!initialRound);
   const [gameMode] = useState<"solo" | "friend">(defaultFriend ? "friend" : "solo");
   const [friendInput] = useState(defaultFriend ?? "");
   const [friendDisplayName, setFriendDisplayName] = useState(defaultFriendName ?? "");
@@ -134,6 +134,7 @@ export default function GameClient({ defaultFriend, defaultFriendName, defaultFr
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (initialRound) return;
     if (defaultFriend) {
       startGame();
       return;

@@ -172,6 +172,7 @@ async function LibraryContent({
               <th className="px-4 py-3 text-left w-10"></th>
               <th className="px-4 py-3 text-left">Title</th>
               <th className="px-4 py-3 text-left">Tags</th>
+              <th className="px-4 py-3 text-left">Description</th>
               <th className="px-4 py-3 text-right">Year</th>
               <th className="px-4 py-3 text-right">Review</th>
               <th className="px-4 py-3 text-right">Achievements</th>
@@ -199,6 +200,11 @@ async function LibraryContent({
                       </span>
                     ))}
                   </div>
+                </td>
+                <td className="px-4 py-2 text-gray-400 max-w-[280px]">
+                  {game.shortDescription
+                    ? <span className="block truncate" title={game.shortDescription}>{game.shortDescription}</span>
+                    : <span className="text-gray-600">—</span>}
                 </td>
                 <td className="px-4 py-2 text-right text-gray-300">{game.releaseYear ?? "—"}</td>
                 <td className="px-4 py-2 text-right"><ReviewBadge pct={game.reviewPct} /></td>

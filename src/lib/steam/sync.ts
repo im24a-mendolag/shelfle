@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { log } from "@/lib/logger";
-import { getOwnedGames, getAppDetails, getCurrentPlayers, getReviewScore, getGamePrices, mergeGameInfo } from "./api";
+import { getOwnedGames, getAppDetails, getCurrentPlayers, getReviewScore, getGamePrices, mergeGameInfo, getShortDescription } from "./api";
 
 /** Upsert the user row on every login. Returns the DB user. */
 export async function syncUser(steamId: string, displayName: string) {
@@ -83,6 +83,18 @@ export async function syncLibrary(userId: string, steamId: string) {
   const needsFull = toEnrich.filter((g) => g.tags.length === 0).slice(0, 50);
   const needsRefresh = toEnrich.filter((g) => g.tags.length > 0).slice(0, 50);
 
+  // Games already enriched (not in toEnrich) but missing shortDescription — backfill 25 per visit
+  const needsDesc = await db.game.findMany({
+    where: {
+      userGames: { some: { userId } },
+      tags: { isEmpty: false },
+      shortDescription: null,
+      NOT: { steamAppId: { in: [...needsFull, ...needsRefresh].map((g) => g.steamAppId) } },
+    },
+    select: { steamAppId: true },
+    take: 25,
+  });
+
   log.info("Library sync", {
     steamId,
     listSynced: needsListSync(user?.syncedAt ?? null),
@@ -90,6 +102,7 @@ export async function syncLibrary(userId: string, steamId: string) {
     enrichFull: needsFull.length,
     enrichRefresh: needsRefresh.length,
     enrichRemaining: Math.max(0, toEnrich.length - needsFull.length - needsRefresh.length),
+    descBackfill: needsDesc.length,
   });
 
   for (const { steamAppId } of needsFull) {
@@ -111,6 +124,7 @@ export async function syncLibrary(userId: string, steamId: string) {
         totalAchievements: info.total_achievements,
         avgPlayers24h: info.avg_players_24h,
         priceChfCents: info.price_chf_cents,
+        shortDescription: details?.short_description ?? null,
         cachedAt: new Date(),
       },
     });
@@ -129,6 +143,16 @@ export async function syncLibrary(userId: string, steamId: string) {
         cachedAt: new Date(),
       },
     });
+  }
+
+  for (const { steamAppId } of needsDesc) {
+    const desc = await getShortDescription(steamAppId);
+    if (desc) {
+      await db.game.update({
+        where: { steamAppId },
+        data: { shortDescription: desc },
+      });
+    }
   }
 
   return gameCount;

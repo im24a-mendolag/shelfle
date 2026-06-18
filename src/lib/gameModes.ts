@@ -23,4 +23,10 @@ export const GAME_MODES = [
     description: "Guess the game from one of its Steam achievements",
     accent: false,
   },
+  {
+    label: "Description",
+    path: "/description",
+    description: "Guess the game from its store description",
+    accent: false,
+  },
 ] as const;

@@ -63,7 +63,7 @@ export default function FriendsList({ friends }: { friends: Friend[] }) {
         placeholder="Search friends…"
         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
       />
-      <div className="flex flex-col divide-y divide-gray-800">
+      <div className="flex flex-col divide-y divide-gray-800 overflow-y-auto max-h-[480px]">
         {filtered.length === 0 ? (
           <p className="py-6 text-sm text-gray-500 text-center">No friends found.</p>
         ) : (

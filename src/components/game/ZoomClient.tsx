@@ -42,13 +42,15 @@ export default function ZoomClient({
   defaultFriend,
   defaultFriendName,
   defaultFriendAvatar,
+  initialRound,
 }: {
   defaultFriend?: string;
   defaultFriendName?: string;
   defaultFriendAvatar?: string;
+  initialRound?: ZoomRound;
 }) {
-  const [round, setRound] = useState<ZoomRound | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [round, setRound] = useState<ZoomRound | null>(initialRound ?? null);
+  const [loading, setLoading] = useState(!initialRound);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
   const [friendDisplayName, setFriendDisplayName] = useState(defaultFriendName ?? "");
@@ -66,6 +68,7 @@ export default function ZoomClient({
   const cropPos = useRef({ x: 50, y: 50 });
 
   useEffect(() => {
+    if (initialRound) return;
     if (defaultFriend) {
       startGame();
       return;
