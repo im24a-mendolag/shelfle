@@ -29,4 +29,10 @@ export const GAME_MODES = [
     description: "Guess the game from its store description",
     accent: false,
   },
+  {
+    label: "Playtime",
+    path: "/playtime",
+    description: "Guess the game from your hours played",
+    accent: false,
+  },
 ] as const;
