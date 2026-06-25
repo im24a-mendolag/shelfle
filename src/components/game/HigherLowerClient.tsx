@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { ChallengeLinkButton } from "@/components/challenge/ChallengeLinkButton";
 
 type HLGame = { steamAppId: number; title: string; headerImage: string; releaseYear: number; priceChfCents: number | null; avgPlayers24h: number | null };
 type HLRightGame = { steamAppId: number; title: string; headerImage: string };
@@ -118,9 +119,6 @@ export default function HigherLowerClient({
   const [loadingLabel, setLoadingLabel] = useState("Loading…");
   const [friendDisplayName, setFriendDisplayName] = useState(defaultFriendName ?? "");
   const [friendAvatarUrl] = useState(defaultFriendAvatar ?? "");
-  const [challengeLink, setChallengeLink] = useState("");
-  const [creatingChallenge, setCreatingChallenge] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const [revealedYear, setRevealedYear] = useState<number | null>(null);
   const [revealedPrice, setRevealedPrice] = useState<number | null | undefined>(undefined);
@@ -206,25 +204,6 @@ export default function HigherLowerClient({
       setRound(d.round);
       setPhase("guessing");
     }, 450);
-  }
-
-  async function createChallenge() {
-    if (!round || creatingChallenge) return;
-    setCreatingChallenge(true);
-    const r = await fetch("/api/challenge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roundId: round.id }),
-    });
-    const d = await r.json();
-    if (d.challengeId) setChallengeLink(`${window.location.origin}/challenge/${d.challengeId}`);
-    setCreatingChallenge(false);
-  }
-
-  async function copyLink() {
-    await navigator.clipboard.writeText(challengeLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   async function submitGuess(answer: "higher" | "lower") {
@@ -421,29 +400,16 @@ export default function HigherLowerClient({
                   View Challenge Results
                 </a>
               ) : (
-                <div className="flex flex-col items-center gap-3">
+                <div className="flex flex-col items-center gap-3 w-full max-w-xs">
                   <button
                     onClick={() => startGame()}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl transition-colors"
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl transition-colors"
                   >
                     {friendName ? `Play Again — ${friendName}'s library` : "Play Again"}
                   </button>
-                  {!challengeLink ? (
-                    <button
-                      onClick={createChallenge}
-                      disabled={creatingChallenge}
-                      className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-xl transition-colors"
-                    >
-                      {creatingChallenge ? "Creating…" : "Challenge a Friend"}
-                    </button>
-                  ) : (
-                    <div className="flex gap-2 w-full max-w-xs">
-                      <input readOnly value={challengeLink} className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-300 truncate" />
-                      <button onClick={copyLink} className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2 rounded-xl transition-colors text-sm shrink-0">
-                        {copied ? "Copied!" : "Copy"}
-                      </button>
-                    </div>
-                  )}
+                  <div className="w-full">
+                    <ChallengeLinkButton key={round.id} roundId={round.id} />
+                  </div>
                 </div>
               )}
             </div>

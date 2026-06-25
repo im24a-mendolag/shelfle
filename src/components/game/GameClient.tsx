@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import type { GuessComparison, NumericResult, NumericStatus } from "@/lib/game/compare";
+import { ChallengeLinkButton } from "@/components/challenge/ChallengeLinkButton";
 
 type Round = {
   id: string;
@@ -129,9 +130,6 @@ export default function GameClient({ defaultFriend, defaultFriendName, defaultFr
   const [results, setResults] = useState<SearchGame[]>([]);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [challengeLink, setChallengeLink] = useState("");
-  const [creatingChallenge, setCreatingChallenge] = useState(false);
-  const [copied, setCopied] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadingTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -224,27 +222,6 @@ export default function GameClient({ defaultFriend, defaultFriendName, defaultFr
       setLoading(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }, 450);
-  }
-
-  async function createChallenge() {
-    if (!round || creatingChallenge) return;
-    setCreatingChallenge(true);
-    const r = await fetch("/api/challenge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roundId: round.id }),
-    });
-    const d = await r.json();
-    if (d.challengeId) {
-      setChallengeLink(`${window.location.origin}/challenge/${d.challengeId}`);
-    }
-    setCreatingChallenge(false);
-  }
-
-  async function copyLink() {
-    await navigator.clipboard.writeText(challengeLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   }
 
   async function submitGuess(game: SearchGame) {
@@ -445,29 +422,7 @@ export default function GameClient({ defaultFriend, defaultFriendName, defaultFr
                       ? `Play Again — ${round.friendName}'s library`
                       : "Play Again"}
                   </button>
-                  {!challengeLink ? (
-                    <button
-                      onClick={createChallenge}
-                      disabled={creatingChallenge}
-                      className="flex-1 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white font-semibold py-3 rounded-xl transition-colors text-base"
-                    >
-                      {creatingChallenge ? "Creating…" : "Challenge a Friend"}
-                    </button>
-                  ) : (
-                    <div className="flex gap-2">
-                      <input
-                        readOnly
-                        value={challengeLink}
-                        className="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm text-gray-300 truncate"
-                      />
-                      <button
-                        onClick={copyLink}
-                        className="bg-gray-700 hover:bg-gray-600 text-white font-semibold px-4 py-2 rounded-xl transition-colors text-sm shrink-0"
-                      >
-                        {copied ? "Copied!" : "Copy"}
-                      </button>
-                    </div>
-                  )}
+                  <ChallengeLinkButton key={round.id} roundId={round.id} />
                 </>
               )}
             </div>
