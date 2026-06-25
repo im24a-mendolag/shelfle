@@ -32,8 +32,7 @@ export default async function DescriptionPage({
       },
     });
     if (!chal || chal.mode !== "description" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
-    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
-    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+    if (chal.rounds.some((r) => r.playerUserId === user.id)) redirect(`/challenge/${challenge}/results`);
 
     // Reuse creator's init record so both players see the same description
     const creatorRound = chal.rounds.find((r) => r.playerUserId === chal.creatorId);

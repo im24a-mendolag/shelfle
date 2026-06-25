@@ -45,6 +45,7 @@ function buildRound(
   targetTitle: string,
   targetHeaderImage: string,
   friendName?: string,
+  challengeId?: string,
 ): PlaytimeRound {
   const wrongCount = realGuesses.filter((g) => !g.won).length;
   const isOver = status === "won" || status === "lost";
@@ -59,6 +60,7 @@ function buildRound(
     targetTitle: isOver ? targetTitle : undefined,
     targetHeaderImage: isOver ? targetHeaderImage : undefined,
     friendName,
+    challengeId,
   };
 }
 

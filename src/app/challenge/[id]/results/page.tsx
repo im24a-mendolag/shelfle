@@ -1,17 +1,8 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authCallbacks } from "@/lib/auth/config";
-import { syncUser } from "@/lib/steam/sync";
 import { db } from "@/lib/db";
-
-const MODE_LABELS: Record<string, string> = {
-  solo: "Classic",
-  friend: "Classic",
-  zoom: "Zoom",
-  achievement: "Achievement",
-  description: "Description",
-  higherlower: "Higher/Lower",
-};
+import { CHALLENGE_MODE_LABELS } from "@/lib/gameModes";
 
 type RoundSummary = {
   playerName: string;
@@ -22,11 +13,7 @@ type RoundSummary = {
 
 function getScore(mode: string, round: { guesses: { resultJson: unknown }[] }): number | null {
   if (mode !== "higherlower") return null;
-  // Find the last guess record (not the init record)
-  const realGuesses = round.guesses.filter((g) => {
-    const d = g.resultJson as { type?: string };
-    return d.type === "guess";
-  });
+  const realGuesses = round.guesses.filter((g) => (g.resultJson as { type?: string }).type === "guess");
   if (realGuesses.length === 0) return 0;
   const last = realGuesses[realGuesses.length - 1].resultJson as { score?: number };
   return last.score ?? 0;
@@ -39,7 +26,6 @@ function determineWinner(mode: string, a: RoundSummary, b: RoundSummary): "a" | 
     if (b.score > a.score) return "b";
     return "tie";
   }
-  // Guess modes: won beats lost; fewer guesses beats more
   if (a.status === "won" && b.status !== "won") return "a";
   if (b.status === "won" && a.status !== "won") return "b";
   if (a.status === "won" && b.status === "won") {
@@ -47,12 +33,11 @@ function determineWinner(mode: string, a: RoundSummary, b: RoundSummary): "a" | 
     if (b.guessCount < a.guessCount) return "b";
     return "tie";
   }
-  return "tie"; // both lost
+  return "tie";
 }
 
-function PlayerCard({ summary, isWinner, isCurrentUser }: { summary: RoundSummary; isWinner: boolean; isCurrentUser: boolean }) {
-  const mode = summary.score !== null ? "higherlower" : "guess";
-  const statusText = mode === "higherlower"
+function PlayerCard({ summary, isWinner, isCurrentUser, isHigherLower }: { summary: RoundSummary; isWinner: boolean; isCurrentUser: boolean; isHigherLower: boolean }) {
+  const statusText = isHigherLower
     ? `Score: ${summary.score ?? 0}`
     : summary.status === "won"
       ? `Won in ${summary.guessCount} guess${summary.guessCount === 1 ? "" : "es"}`
@@ -69,7 +54,7 @@ function PlayerCard({ summary, isWinner, isCurrentUser }: { summary: RoundSummar
         {summary.playerName}
         {isCurrentUser && <span className="text-xs text-gray-400 ml-1">(you)</span>}
       </p>
-      <p className={`text-sm font-medium ${summary.status === "won" || (mode === "higherlower") ? "text-green-400" : "text-red-400"}`}>
+      <p className={`text-sm font-medium ${summary.status === "won" || isHigherLower ? "text-green-400" : "text-red-400"}`}>
         {statusText}
       </p>
     </div>
@@ -81,39 +66,36 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
 
-  const user = await syncUser(session.user.steamId, session.user.name ?? "");
-
-  const challenge = await db.challenge.findUnique({
-    where: { id },
-    include: {
-      game: { select: { title: true, headerImage: true } },
-      rounds: {
-        include: {
-          guesses: { orderBy: { guessedAt: "asc" } },
-          player: { select: { id: true, displayName: true } },
+  const [user, challenge] = await Promise.all([
+    db.user.findUnique({ where: { steamId: session.user.steamId }, select: { id: true } }),
+    db.challenge.findUnique({
+      where: { id },
+      include: {
+        game: { select: { title: true, headerImage: true } },
+        rounds: {
+          include: {
+            guesses: { orderBy: { guessedAt: "asc" } },
+            player: { select: { id: true, displayName: true } },
+          },
+          orderBy: { createdAt: "asc" },
         },
-        orderBy: { createdAt: "asc" },
       },
-    },
-  });
+    }),
+  ]);
 
-  if (!challenge) redirect("/");
+  if (!user || !challenge) redirect("/");
 
   const creatorRound = challenge.rounds.find((r) => r.playerUserId === challenge.creatorId);
   const opponentRound = challenge.rounds.find((r) => r.playerUserId !== challenge.creatorId);
 
-  // Need at least the current user's round to show results
   if (!creatorRound && !opponentRound) redirect(`/challenge/${id}`);
 
-  const modeLabel = MODE_LABELS[challenge.mode] ?? challenge.mode;
+  const modeLabel = CHALLENGE_MODE_LABELS[challenge.mode] ?? challenge.mode;
+  const isHigherLower = challenge.mode === "higherlower";
 
   const toSummary = (round: typeof creatorRound): RoundSummary | null => {
     if (!round) return null;
-    // Exclude init record (type: "init") from guess count for achievement/description/higherlower modes
-    const realGuesses = round.guesses.filter((g) => {
-      const d = g.resultJson as { type?: string };
-      return d.type !== "init";
-    });
+    const realGuesses = round.guesses.filter((g) => (g.resultJson as { type?: string }).type !== "init");
     return {
       playerName: round.player.displayName,
       status: round.status,
@@ -125,17 +107,15 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
   const creatorSummary = toSummary(creatorRound);
   const opponentSummary = toSummary(opponentRound);
 
-  const winner =
-    creatorSummary && opponentSummary
-      ? determineWinner(challenge.mode, creatorSummary, opponentSummary)
-      : null;
+  const winner = creatorSummary && opponentSummary
+    ? determineWinner(challenge.mode, creatorSummary, opponentSummary)
+    : null;
 
   const waitingForOpponent = !!creatorRound && !opponentRound;
   const waitingForCreator = !creatorRound && !!opponentRound;
 
   return (
     <main className="max-w-xl mx-auto px-4 py-12 flex flex-col gap-6">
-      {/* Header */}
       <div className="text-center flex flex-col gap-2">
         <span className="text-xs font-semibold uppercase tracking-widest text-blue-400 bg-blue-950 px-3 py-1 rounded-full self-center">
           {modeLabel} Challenge
@@ -146,26 +126,20 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
             <p className="text-sm text-gray-400 py-2 px-3">{challenge.game.title}</p>
           </div>
         )}
-        {!challenge.game && challenge.mode === "higherlower" && (
+        {!challenge.game && isHigherLower && (
           <p className="text-sm text-gray-500 mt-1">Highest score wins</p>
         )}
       </div>
 
-      {/* Winner banner */}
       {winner === "tie" && (
         <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-4 text-center">
           <p className="text-yellow-400 font-semibold text-lg">It&apos;s a tie!</p>
         </div>
       )}
 
-      {/* Player cards */}
       <div className="flex flex-col sm:flex-row gap-4">
         {creatorSummary ? (
-          <PlayerCard
-            summary={creatorSummary}
-            isWinner={winner === "a"}
-            isCurrentUser={user.id === challenge.creatorId}
-          />
+          <PlayerCard summary={creatorSummary} isWinner={winner === "a"} isCurrentUser={user.id === challenge.creatorId} isHigherLower={isHigherLower} />
         ) : (
           <div className="flex-1 rounded-xl border border-gray-700 bg-gray-900 p-5 text-center">
             <p className="text-gray-500 text-sm">Waiting for challenger…</p>
@@ -175,11 +149,7 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
         <div className="flex items-center justify-center text-gray-600 font-bold text-xl sm:self-center">vs</div>
 
         {opponentSummary ? (
-          <PlayerCard
-            summary={opponentSummary}
-            isWinner={winner === "b"}
-            isCurrentUser={user.id !== challenge.creatorId}
-          />
+          <PlayerCard summary={opponentSummary} isWinner={winner === "b"} isCurrentUser={user.id !== challenge.creatorId} isHigherLower={isHigherLower} />
         ) : (
           <div className="flex-1 rounded-xl border border-gray-700 bg-gray-900 p-5 text-center">
             <p className="text-gray-500 text-sm">Waiting for opponent…</p>
@@ -187,7 +157,6 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
         )}
       </div>
 
-      {/* Pending states */}
       {waitingForOpponent && (
         <p className="text-gray-400 text-sm text-center">
           Your friend hasn&apos;t played yet. Share the link so they can compete!
@@ -199,12 +168,8 @@ export default async function ChallengeResultsPage({ params }: { params: Promise
         </p>
       )}
 
-      {/* Actions */}
       <div className="flex flex-col gap-3 mt-2">
-        <a
-          href="/"
-          className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-colors text-center"
-        >
+        <a href="/" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-colors text-center">
           Back to Home
         </a>
       </div>

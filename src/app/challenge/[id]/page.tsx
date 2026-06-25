@@ -1,57 +1,39 @@
 import { getServerSession } from "next-auth";
 import { redirect } from "next/navigation";
 import { authCallbacks } from "@/lib/auth/config";
-import { syncUser } from "@/lib/steam/sync";
 import { db } from "@/lib/db";
 import { CopyLinkRow } from "@/components/challenge/ChallengeActions";
-
-const MODE_LABELS: Record<string, string> = {
-  solo: "Classic",
-  friend: "Classic",
-  zoom: "Zoom",
-  achievement: "Achievement",
-  description: "Description",
-  higherlower: "Higher/Lower",
-};
-
-const MODE_PATHS: Record<string, string> = {
-  solo: "/play",
-  friend: "/play",
-  zoom: "/zoom",
-  achievement: "/achievement",
-  description: "/description",
-  higherlower: "/higherlower",
-};
+import { CHALLENGE_MODE_LABELS, CHALLENGE_MODE_PATHS } from "@/lib/gameModes";
 
 export default async function ChallengePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
 
-  const user = await syncUser(session.user.steamId, session.user.name ?? "");
+  const [user, challenge] = await Promise.all([
+    db.user.findUnique({ where: { steamId: session.user.steamId }, select: { id: true } }),
+    db.challenge.findUnique({
+      where: { id },
+      include: {
+        creator: { select: { id: true, displayName: true } },
+        target: { select: { displayName: true } },
+        game: { select: { title: true, headerImage: true } },
+        rounds: { select: { playerUserId: true, status: true } },
+      },
+    }),
+  ]);
 
-  const challenge = await db.challenge.findUnique({
-    where: { id },
-    include: {
-      creator: { select: { id: true, displayName: true } },
-      target: { select: { displayName: true } },
-      game: { select: { title: true, headerImage: true } },
-      rounds: { select: { playerUserId: true, status: true } },
-    },
-  });
-
-  if (!challenge) redirect("/");
+  if (!user || !challenge) redirect("/");
 
   const expired = challenge.expiresAt < new Date();
   const isCreator = user.id === challenge.creatorId;
   const currentUserRound = challenge.rounds.find((r) => r.playerUserId === user.id);
   const opponentRound = challenge.rounds.find((r) => r.playerUserId !== challenge.creatorId);
 
-  // Opponent already finished → go straight to results
   if (!isCreator && currentUserRound) redirect(`/challenge/${id}/results`);
 
-  const modeLabel = MODE_LABELS[challenge.mode] ?? challenge.mode;
-  const playPath = `${MODE_PATHS[challenge.mode] ?? "/play"}?challenge=${id}`;
+  const modeLabel = CHALLENGE_MODE_LABELS[challenge.mode] ?? challenge.mode;
+  const playPath = `${CHALLENGE_MODE_PATHS[challenge.mode] ?? "/play"}?challenge=${id}`;
   const challengeUrl = `${process.env.NEXTAUTH_URL ?? "https://shelfle.vercel.app"}/challenge/${id}`;
 
   return (

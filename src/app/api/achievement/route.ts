@@ -46,6 +46,7 @@ function buildRound(
   targetTitle: string,
   targetHeaderImage: string,
   friendName?: string,
+  challengeId?: string,
 ): AchievementRound {
   const wrongCount = realGuesses.filter((g) => !g.won).length;
   const clueLevel: 0 | 1 | 2 | 3 = wrongCount >= 4 ? 3 : wrongCount >= 3 ? 2 : wrongCount >= 2 ? 1 : 0;
@@ -69,6 +70,7 @@ function buildRound(
     targetTitle: isOver ? targetTitle : undefined,
     targetHeaderImage: isOver ? targetHeaderImage : undefined,
     friendName,
+    challengeId,
   };
 }
 

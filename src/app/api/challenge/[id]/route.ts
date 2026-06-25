@@ -8,27 +8,27 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!session?.user.steamId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
-  const user = await db.user.findUnique({ where: { steamId: session.user.steamId } });
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const challenge = await db.challenge.findUnique({
-    where: { id },
-    include: {
-      creator: { select: { id: true, displayName: true, steamId: true } },
-      target: { select: { id: true, displayName: true } },
-      game: { select: { steamAppId: true, title: true, headerImage: true } },
-      rounds: {
-        include: { guesses: { orderBy: { guessedAt: "asc" } }, player: { select: { id: true, displayName: true, steamId: true } } },
-        orderBy: { createdAt: "asc" },
+  const [user, challenge] = await Promise.all([
+    db.user.findUnique({ where: { steamId: session.user.steamId } }),
+    db.challenge.findUnique({
+      where: { id },
+      include: {
+        creator: { select: { id: true, displayName: true, steamId: true } },
+        target: { select: { id: true, displayName: true } },
+        game: { select: { steamAppId: true, title: true, headerImage: true } },
+        rounds: {
+          include: { guesses: { orderBy: { guessedAt: "asc" } }, player: { select: { id: true, displayName: true, steamId: true } } },
+          orderBy: { createdAt: "asc" },
+        },
       },
-    },
-  });
+    }),
+  ]);
 
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!challenge) return NextResponse.json({ error: "Challenge not found" }, { status: 404 });
 
-  const now = new Date();
-  const expired = challenge.expiresAt < now;
-
+  const expired = challenge.expiresAt < new Date();
   const creatorRound = challenge.rounds.find((r) => r.playerUserId === challenge.creatorId);
   const opponentRound = challenge.rounds.find((r) => r.playerUserId !== challenge.creatorId);
   const currentUserRound = challenge.rounds.find((r) => r.playerUserId === user.id);
@@ -36,10 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const serializeRound = (r: typeof creatorRound) => {
     if (!r) return null;
-    const guessCount = r.guesses.length;
-    const won = r.status === "won";
-    const lost = r.status === "lost";
-    // For HigherLower: score is the last guess's score field
+    const realGuesses = r.guesses.filter((g) => (g.resultJson as { type?: string }).type !== "init");
     let score: number | null = null;
     if (challenge.mode === "higherlower") {
       const lastGuess = r.guesses[r.guesses.length - 1];
@@ -53,9 +50,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       playerName: r.player.displayName,
       playerSteamId: r.player.steamId,
       status: r.status,
-      guessCount,
-      won,
-      lost,
+      guessCount: realGuesses.length,
       score,
     };
   };

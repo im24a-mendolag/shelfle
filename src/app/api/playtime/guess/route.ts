@@ -2,9 +2,8 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { authCallbacks } from "@/lib/auth/config";
 import { db } from "@/lib/db";
-import type { InitRecord, GuessRecord, PlaytimeRound } from "@/app/api/playtime/route";
-
-const MAX_GUESSES = 3;
+import { buildRound, MAX_GUESSES } from "@/lib/playtime";
+import type { InitRecord, GuessRecord } from "@/app/api/playtime/route";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authCallbacks);
@@ -38,7 +37,6 @@ export async function POST(req: NextRequest) {
   if (!guessedGame) return NextResponse.json({ error: "Game not found" }, { status: 404 });
 
   const won = guessedAppId === round.targetAppId;
-
   const guessRecord: GuessRecord = {
     type: "guess",
     guessedAppId,
@@ -47,28 +45,24 @@ export async function POST(req: NextRequest) {
     won,
   };
 
-  await db.guess.create({ data: { roundId: round.id, guessedAppId, resultJson: guessRecord as object } });
-
   const newRealGuesses = [...realGuesses, guessRecord];
-  const wrongCount = newRealGuesses.filter((g) => !g.won).length;
   const lost = !won && newRealGuesses.length >= MAX_GUESSES;
 
-  if (won || lost) {
-    await db.round.update({ where: { id: round.id }, data: { status: won ? "won" : "lost" } });
-  }
+  await Promise.all([
+    db.guess.create({ data: { roundId: round.id, guessedAppId, resultJson: guessRecord as object } }),
+    won || lost
+      ? db.round.update({ where: { id: round.id }, data: { status: won ? "won" : "lost" } })
+      : Promise.resolve(),
+  ]);
 
-  const isOver = won || lost;
-  const updatedRound: PlaytimeRound = {
-    id: round.id,
-    status: isOver ? (won ? "won" : "lost") : "active",
-    guesses: newRealGuesses.map((g) => ({ guessedAppId: g.guessedAppId, title: g.title, headerImage: g.headerImage, won: g.won })),
-    maxGuesses: MAX_GUESSES,
-    playtimeHours: init.playtimeHours,
-    avgPlayers24h: wrongCount >= 1 || isOver ? init.avgPlayers24h : undefined,
-    firstLetter: wrongCount >= 2 || isOver ? init.firstLetter : undefined,
-    targetTitle: isOver ? round.game.title : undefined,
-    targetHeaderImage: isOver ? round.game.headerImage : undefined,
-  };
-
-  return NextResponse.json({ round: updatedRound });
+  return NextResponse.json({
+    round: buildRound(
+      round.id,
+      won ? "won" : lost ? "lost" : "active",
+      init,
+      newRealGuesses,
+      round.game.title,
+      round.game.headerImage,
+    ),
+  });
 }

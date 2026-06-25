@@ -6,36 +6,8 @@ import { syncUser, syncLibrary } from "@/lib/steam/sync";
 import { resolveSteamId, getSteamProfile } from "@/lib/steam/api";
 import { db } from "@/lib/db";
 import PlaytimeClient from "@/components/game/PlaytimeClient";
-import type { InitRecord, GuessRecord, PlaytimeRound } from "@/app/api/playtime/route";
-
-const MAX_GUESSES = 3;
-
-function buildRound(
-  roundId: string,
-  status: string,
-  init: InitRecord,
-  realGuesses: GuessRecord[],
-  targetTitle: string,
-  targetHeaderImage: string,
-  friendName?: string,
-  challengeId?: string,
-): PlaytimeRound {
-  const wrongCount = realGuesses.filter((g) => !g.won).length;
-  const isOver = status === "won" || status === "lost";
-  return {
-    id: roundId,
-    status: status as "active" | "won" | "lost",
-    guesses: realGuesses.map((g) => ({ guessedAppId: g.guessedAppId, title: g.title, headerImage: g.headerImage, won: g.won })),
-    maxGuesses: MAX_GUESSES,
-    playtimeHours: init.playtimeHours,
-    avgPlayers24h: wrongCount >= 1 || isOver ? init.avgPlayers24h : undefined,
-    firstLetter: wrongCount >= 2 || isOver ? init.firstLetter : undefined,
-    targetTitle: isOver ? targetTitle : undefined,
-    targetHeaderImage: isOver ? targetHeaderImage : undefined,
-    friendName,
-    challengeId,
-  };
-}
+import { buildRound } from "@/lib/playtime";
+import type { InitRecord, GuessRecord } from "@/app/api/playtime/route";
 
 export default async function PlaytimePage({
   searchParams,
@@ -60,8 +32,7 @@ export default async function PlaytimePage({
       },
     });
     if (!chal || chal.mode !== "playtime" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
-    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
-    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+    if (chal.rounds.some((r) => r.playerUserId === user.id)) redirect(`/challenge/${challenge}/results`);
 
     const creatorRound = chal.rounds.find((r) => r.playerUserId === chal.creatorId);
     const creatorInit = creatorRound?.guesses[0]?.resultJson as InitRecord | undefined;
