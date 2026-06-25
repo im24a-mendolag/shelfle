@@ -14,12 +14,23 @@ Shelfle is a Next.js 15 web app where users guess games from their Steam library
 src/
   app/
     layout.tsx              # Root layout — injects Navbar, sets bg-gray-950 on body
+    loading.tsx             # Shared loading UI — covers all routes (no per-mode loading files needed)
     page.tsx                # Home page (mode cards, stats, friends)
     play/page.tsx           # Classic mode server entry
     zoom/page.tsx           # Zoom mode server entry
+    achievement/page.tsx    # Achievement mode server entry
+    description/page.tsx    # Description mode server entry
+    higherlower/page.tsx    # Higher/Lower mode server entry
     library/page.tsx        # Library browser (paginated table of enriched games)
+    challenge/
+      [id]/
+        page.tsx            # Challenge landing page (share link or accept CTA)
+        results/page.tsx    # Side-by-side results after both players finish
     api/
       auth/[...nextauth]/   # NextAuth Steam OAuth handler
+      challenge/
+        route.ts            # POST create challenge from a completed round
+        [id]/route.ts       # GET fetch challenge + both participants' round data
       game/
         route.ts            # GET restore round / POST start new Classic round
         guess/route.ts      # POST submit Classic guess
@@ -27,6 +38,15 @@ src/
       zoom/
         route.ts            # GET restore round / POST start new Zoom round
         guess/route.ts      # POST submit Zoom guess
+      achievement/
+        route.ts            # GET/POST Achievement round
+        guess/route.ts      # POST submit Achievement guess
+      description/
+        route.ts            # GET/POST Description round
+        guess/route.ts      # POST submit Description guess
+      higherlower/
+        route.ts            # GET/POST Higher/Lower round
+        guess/route.ts      # POST submit Higher/Lower guess
   components/
     Navbar.tsx              # Shared top nav (server component)
     NavLinks.tsx            # Client component — active link highlighting
@@ -35,12 +55,18 @@ src/
     SteamLoginButton.tsx    # Steam OAuth login button
     FriendLibraryInput.tsx  # Input for Steam ID / vanity URL
     FriendsList.tsx         # Sidebar list of Steam friends with Play dropdowns
+    challenge/
+      ChallengeActions.tsx  # Client component — copy-link row used on challenge landing page
     game/
       GameClient.tsx        # Classic mode UI (full client component)
-      ZoomClient.tsx        # Zoom mode UI (full client component)
+      ZoomClient.tsx        # Zoom mode UI
+      AchievementClient.tsx # Achievement mode UI
+      DescriptionClient.tsx # Description mode UI
+      HigherLowerClient.tsx # Higher/Lower mode UI
   lib/
     db.ts                   # Prisma client singleton
     logger.ts               # File-based logger (logs/app.log)
+    description.ts          # Shared types + buildRound() + redactTitle() for Description mode
     auth/
       config.ts             # NextAuth config (Steam provider, JWT callbacks)
     steam/
@@ -68,16 +94,21 @@ Game          { steamAppId (PK), title, headerImage, tags[], releaseYear,
                 priceChfCents, priceUsdCents, priceEurCents, cachedAt }
 UserGame      { userId, steamAppId, playtimeHours }   -- composite PK
 Round         { id, playerUserId, targetUserId, targetAppId,
-                mode (varchar), status (active/won/lost/abandoned), createdAt }
+                mode (varchar), status (active/won/lost/abandoned),
+                challengeId? (FK → Challenge), createdAt }
 Guess         { id, roundId, guessedAppId, resultJson (JSONB), guessedAt }
 Stats         { userId (PK), roundsPlayed, roundsWon, currentStreak, bestStreak }
+Challenge     { id, mode, gameAppId? (null for HigherLower), targetUserId,
+                creatorId, status (pending/completed), expiresAt, createdAt }
 ```
 
 **Key design decisions:**
 - `Round.mode` is a plain varchar — add any string you want ("classic", "zoom", "yourmode")
 - `Round.targetUserId` = the library being guessed from (equals playerUserId in solo, friend's userId in friend mode)
+- `Round.challengeId` links a round to a challenge — both the creator's and opponent's rounds point to the same `Challenge` row
 - `Guess.resultJson` is untyped JSONB — each mode stores its own structure there
 - `Stats` only tracks Classic mode wins currently
+- `Challenge.gameAppId` is null for HigherLower (no fixed game — score comparison only)
 
 ---
 
@@ -89,9 +120,10 @@ Every mode follows the same structure. Use Classic + Zoom as templates.
 - Server component
 - Calls `getServerSession`, redirects to `/` if unauthenticated
 - Calls `syncUser` + `syncLibrary` to keep the library fresh
-- Reads `searchParams` for `friend`, `friendName`, `friendAvatar`
-- **Creates the initial round server-side** (check for existing solo round to resume, or abandon + create new) and passes it as `initialRound` prop to the client
-- This eliminates the client-side loading bar on first load — the client mounts with a ready round
+- Reads `searchParams` for `friend`, `friendName`, `friendAvatar`, **and `challenge`**
+- If `?challenge=<id>` is present: loads the challenge, validates it, creates a forced round linked to that challenge, and passes `challengeId` to the client (see *1v1 Challenges* section below)
+- Otherwise: checks for an existing solo round to resume, or abandons active rounds + creates a new one
+- Passes the round as `initialRound` to the client — **no client-side loading bar on first load**
 
 ### 2. Client component (`src/components/game/YourModeClient.tsx`)
 - `"use client"` — handles all game state
@@ -136,6 +168,43 @@ const round = await db.round.findFirst({
 // Compute result, create Guess record with resultJson
 // If won or lost: update Round.status, update Stats (roundsPlayed, roundsWon, streak)
 ```
+
+---
+
+## 1v1 Challenges
+
+Async head-to-head: Player A finishes a round → shares a link → Player B plays the same game → results compared.
+
+### Flow
+
+1. After any round ends, the client shows a **"Challenge a Friend"** button (only if not already in a challenge response).
+2. Clicking it calls `POST /api/challenge` with `{ roundId }` → returns `{ challengeId }`.
+3. The client shows a copy-able link: `<origin>/challenge/<id>`.
+4. Player B opens the link → `/challenge/[id]` landing page → clicks "Accept Challenge".
+5. The button links to the mode's page with `?challenge=<id>` (e.g. `/play?challenge=<id>`).
+6. The mode page detects the param, validates the challenge, creates a forced round (same game + same library) linked to the challenge via `Round.challengeId`.
+7. After finishing, the client shows **"View Challenge Results"** → `/challenge/[id]/results`.
+
+### Key rules
+
+- Challenges expire after **48 hours**.
+- Achievement and Description challenges reuse the creator's `InitRecord` (first guess) so both players see the exact same achievement/description.
+- HigherLower challenges share the same library (`targetUserId`) but use random game pairs — winner is determined by final score.
+- The creator's round and opponent's round both have `challengeId` pointing to the same `Challenge` row. The results page queries `challenge.rounds` to find both.
+
+### API routes
+
+| Route | Purpose |
+|---|---|
+| `POST /api/challenge` | Create a challenge from a finished round |
+| `GET /api/challenge/[id]` | Fetch challenge metadata + serialised round summaries for both players |
+
+### Pages
+
+| Page | Purpose |
+|---|---|
+| `/challenge/[id]` | Landing — shows mode, creator name, share link (creator) or "Accept Challenge" CTA (opponent) |
+| `/challenge/[id]/results` | Side-by-side result cards with winner declaration |
 
 ---
 

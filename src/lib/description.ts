@@ -24,6 +24,7 @@ export type DescriptionRound = {
   targetTitle?: string;
   targetHeaderImage?: string;
   friendName?: string;
+  challengeId?: string;
 };
 
 export function buildRound(
@@ -34,6 +35,7 @@ export function buildRound(
   targetTitle: string,
   targetHeaderImage: string,
   friendName?: string,
+  challengeId?: string,
 ): DescriptionRound {
   const wrongCount = realGuesses.filter((g) => !g.won).length;
   const isOver = status === "won" || status === "lost";
@@ -54,6 +56,7 @@ export function buildRound(
     targetTitle: isOver ? targetTitle : undefined,
     targetHeaderImage: isOver ? targetHeaderImage : undefined,
     friendName,
+    challengeId,
   };
 }
 

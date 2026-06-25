@@ -24,7 +24,7 @@ async function pickEnrichedGame(userId: string) {
 export default async function ZoomPage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -32,7 +32,32 @@ export default async function ZoomPage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ────────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({ where: { id: challenge } });
+    if (!chal || chal.mode !== "zoom" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const forcedGame = await db.game.findUnique({ where: { steamAppId: chal.gameAppId } });
+    if (!forcedGame) redirect("/");
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: chal.gameAppId, mode: "zoom", status: "active", challengeId: chal.id },
+    });
+    return (
+      <ZoomClient
+        challengeId={chal.id}
+        initialRound={{ id: round.id, status: "active", guesses: [], maxGuesses: MAX_GUESSES, targetHeaderImage: forcedGame.headerImage }}
+      />
+    );
+  }
+
+  // ── Normal mode ───────────────────────────────────────────────────────────
 
   // For solo: resume existing active round if present
   if (!friend) {
@@ -45,6 +70,7 @@ export default async function ZoomPage({
       const guesses = existing.guesses.map((g) => g.resultJson as ZoomGuess);
       return (
         <ZoomClient
+          challengeId={existing.challengeId ?? undefined}
           initialRound={{
             id: existing.id,
             status: existing.status as "active" | "won" | "lost",

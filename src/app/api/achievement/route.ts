@@ -35,6 +35,7 @@ export type AchievementRound = {
   targetTitle?: string;
   targetHeaderImage?: string;
   friendName?: string;
+  challengeId?: string;
 };
 
 function buildRound(

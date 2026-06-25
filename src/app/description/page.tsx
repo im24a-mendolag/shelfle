@@ -12,7 +12,7 @@ import { buildRound, redactTitle } from "@/lib/description";
 export default async function DescriptionPage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -20,7 +20,42 @@ export default async function DescriptionPage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ────────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({
+      where: { id: challenge },
+      include: {
+        rounds: { include: { guesses: { orderBy: { guessedAt: "asc" } } }, orderBy: { createdAt: "asc" } },
+        game: true,
+      },
+    });
+    if (!chal || chal.mode !== "description" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    // Reuse creator's init record so both players see the same description
+    const creatorRound = chal.rounds.find((r) => r.playerUserId === chal.creatorId);
+    const creatorInit = creatorRound?.guesses[0]?.resultJson as InitRecord | undefined;
+    if (!creatorInit || !chal.game) redirect("/");
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: chal.gameAppId, mode: "description", status: "active", challengeId: chal.id },
+    });
+    await db.guess.create({ data: { roundId: round.id, guessedAppId: chal.gameAppId, resultJson: creatorInit as object } });
+
+    return (
+      <DescriptionClient
+        challengeId={chal.id}
+        initialRound={buildRound(round.id, "active", creatorInit, [], chal.game.title, chal.game.headerImage, undefined, chal.id)}
+      />
+    );
+  }
+
+  // ── Normal mode ───────────────────────────────────────────────────────────
 
   if (!friend) {
     const existing = await db.round.findFirst({
@@ -34,7 +69,8 @@ export default async function DescriptionPage({
       const realGuesses = all.slice(1) as GuessRecord[];
       return (
         <DescriptionClient
-          initialRound={buildRound(existing.id, existing.status, init, realGuesses, existing.game.title, existing.game.headerImage)}
+          challengeId={existing.challengeId ?? undefined}
+          initialRound={buildRound(existing.id, existing.status, init, realGuesses, existing.game.title, existing.game.headerImage, undefined, existing.challengeId ?? undefined)}
         />
       );
     }
@@ -65,33 +101,19 @@ export default async function DescriptionPage({
     where: { userId: targetUser.id },
     include: {
       game: {
-        select: {
-          steamAppId: true,
-          title: true,
-          headerImage: true,
-          tags: true,
-          releaseYear: true,
-          reviewPct: true,
-          shortDescription: true,
-        },
+        select: { steamAppId: true, title: true, headerImage: true, tags: true, releaseYear: true, reviewPct: true, shortDescription: true },
       },
     },
   });
 
   const candidates = rows
-    .filter(
-      (ug) =>
-        ug.game.headerImage !== "" &&
-        ug.game.tags.length > 0 &&
-        ug.game.releaseYear !== null,
-    )
+    .filter((ug) => ug.game.headerImage !== "" && ug.game.tags.length > 0 && ug.game.releaseYear !== null)
     .map((ug) => ug.game);
 
   if (candidates.length === 0) {
     return <DescriptionClient defaultFriend={friend} defaultFriendName={resolvedFriendName} defaultFriendAvatar={friendAvatar} />;
   }
 
-  // Shuffle and find a game that has (or can fetch) a description
   const shuffled = candidates.sort(() => Math.random() - 0.5);
   type ChosenGame = (typeof shuffled)[0] & { shortDescription: string };
   let chosenGame: ChosenGame | null = null;
@@ -113,13 +135,7 @@ export default async function DescriptionPage({
   }
 
   const round = await db.round.create({
-    data: {
-      playerUserId: user.id,
-      targetUserId: targetUser.id,
-      targetAppId: chosenGame.steamAppId,
-      mode: "description",
-      status: "active",
-    },
+    data: { playerUserId: user.id, targetUserId: targetUser.id, targetAppId: chosenGame.steamAppId, mode: "description", status: "active" },
   });
 
   const init: InitRecord = {

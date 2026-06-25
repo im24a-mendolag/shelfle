@@ -44,7 +44,7 @@ import YourModeClient from "@/components/game/YourModeClient";
 export default async function YourModePage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -52,7 +52,34 @@ export default async function YourModePage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ──────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({ where: { id: challenge } });
+    // validate: exists, correct mode, has a forced game, not expired
+    if (!chal || chal.mode !== "yourmode" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
+    // if already played, go straight to results
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const forcedGame = await db.game.findUnique({ where: { steamAppId: chal.gameAppId } });
+    if (!forcedGame) redirect("/");
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: chal.gameAppId, mode: "yourmode", status: "active", challengeId: chal.id },
+    });
+    return (
+      <YourModeClient
+        challengeId={chal.id}
+        initialRound={{ id: round.id, status: "active", /* ...mode-specific fields */ }}
+      />
+    );
+  }
+
+  // ── Normal mode ─────────────────────────────────────────────────────────
 
   // For solo: resume existing active round if present
   if (!friend) {
@@ -63,7 +90,8 @@ export default async function YourModePage({
     });
     if (existing) {
       // reconstruct your round shape from existing.guesses and pass as initialRound
-      return <YourModeClient initialRound={{ /* ... */ }} />;
+      // pass challengeId so the client shows "View Results" if this was a challenge round
+      return <YourModeClient challengeId={existing.challengeId ?? undefined} initialRound={{ /* ... */ }} />;
     }
   }
 
@@ -100,26 +128,7 @@ export default async function YourModePage({
 }
 ```
 
-Also add a `loading.tsx` in the same directory so Next.js shows feedback while the server page runs:
-
-```ts
-// src/app/yourmode/loading.tsx
-export default function Loading() {
-  return (
-    <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-      <div className="flex flex-col items-center gap-4 py-20 max-w-sm mx-auto w-full">
-        <div className="w-full max-w-xs flex flex-col gap-3">
-          <p className="text-sm text-gray-300 text-center">Loading…</p>
-          <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden">
-            <div className="h-2 rounded-full bg-blue-500 animate-pulse" style={{ width: "25%" }} />
-          </div>
-          <p className="text-xs text-gray-600 text-center">25%</p>
-        </div>
-      </div>
-    </main>
-  );
-}
-```
+No `loading.tsx` needed — `src/app/loading.tsx` at the root covers all mode pages automatically.
 
 ---
 
@@ -207,6 +216,49 @@ Key points:
 - Search uses the shared endpoint: `GET /api/game/search?q=`
 - No page header — the `<Navbar>` is injected by `layout.tsx`
 
+### Challenge support in the client
+
+Accept a `challengeId?: string` prop. When the round ends, use it to decide what to render:
+
+```tsx
+export default function YourModeClient({
+  initialRound,
+  challengeId,
+  // ...
+}: {
+  initialRound?: YourRoundType;
+  challengeId?: string;
+  // ...
+}) {
+  const [challengeLink, setChallengeLink] = useState("");
+
+  async function createChallenge() {
+    const r = await fetch("/api/challenge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roundId: round.id }),
+    });
+    const d = await r.json();
+    if (d.challengeId) setChallengeLink(`${window.location.origin}/challenge/${d.challengeId}`);
+  }
+
+  // In the post-round UI:
+  return challengeId ? (
+    // Opponent view: go see results
+    <a href={`/challenge/${challengeId}/results`}>View Challenge Results</a>
+  ) : (
+    // Creator view: play again + create challenge
+    <>
+      <button onClick={startGame}>Play Again</button>
+      {!challengeLink
+        ? <button onClick={createChallenge}>Challenge a Friend</button>
+        : <CopyRow url={challengeLink} />
+      }
+    </>
+  );
+}
+```
+
 ---
 
 ## 5. No database changes needed
@@ -219,10 +271,9 @@ Key points:
 ## Checklist
 
 - [ ] Entry added to `src/lib/gameModes.ts`
-- [ ] `src/app/yourmode/page.tsx` (syncs library + creates initial round server-side)
-- [ ] `src/app/yourmode/loading.tsx` (shown by Next.js while server page runs)
+- [ ] `src/app/yourmode/page.tsx` — syncs library, handles `?challenge=` param, creates initial round server-side
 - [ ] `src/app/api/yourmode/route.ts` (POST only needed for "Play Again"; GET optional)
 - [ ] `src/app/api/yourmode/guess/route.ts` (POST)
-- [ ] `src/components/game/YourModeClient.tsx` (accepts `initialRound` prop)
+- [ ] `src/components/game/YourModeClient.tsx` — accepts `initialRound` and `challengeId` props; renders "View Results" or "Challenge a Friend" after round ends
 - [ ] Optional: footer stat in `footerText` map in `src/app/page.tsx`
 - [ ] Update `CONTEXT.md` — add the new mode to the project structure tree and document any new utilities, API routes, or patterns it introduces

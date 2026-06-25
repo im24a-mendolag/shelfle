@@ -16,6 +16,7 @@ function buildRound(
   targetTitle: string,
   targetHeaderImage: string,
   friendName?: string,
+  challengeId?: string,
 ): AchievementRound {
   const wrongCount = realGuesses.filter((g) => !g.won).length;
   const clueLevel: 0 | 1 | 2 | 3 = wrongCount >= 4 ? 3 : wrongCount >= 3 ? 2 : wrongCount >= 2 ? 1 : 0;
@@ -33,13 +34,14 @@ function buildRound(
     targetTitle: isOver ? targetTitle : undefined,
     targetHeaderImage: isOver ? targetHeaderImage : undefined,
     friendName,
+    challengeId,
   };
 }
 
 export default async function AchievementPage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -47,7 +49,42 @@ export default async function AchievementPage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ────────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({
+      where: { id: challenge },
+      include: {
+        rounds: { include: { guesses: { orderBy: { guessedAt: "asc" } } }, orderBy: { createdAt: "asc" } },
+        game: true,
+      },
+    });
+    if (!chal || chal.mode !== "achievement" || !chal.gameAppId || chal.expiresAt < new Date()) redirect("/");
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    // Reuse creator's achievement data so both players see the same achievement
+    const creatorRound = chal.rounds.find((r) => r.playerUserId === chal.creatorId);
+    const creatorInit = creatorRound?.guesses[0]?.resultJson as InitRecord | undefined;
+    if (!creatorInit || !chal.game) redirect("/");
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: chal.gameAppId, mode: "achievement", status: "active", challengeId: chal.id },
+    });
+    await db.guess.create({ data: { roundId: round.id, guessedAppId: chal.gameAppId, resultJson: creatorInit as object } });
+
+    return (
+      <AchievementClient
+        challengeId={chal.id}
+        initialRound={buildRound(round.id, "active", creatorInit, [], chal.game.title, chal.game.headerImage, undefined, chal.id)}
+      />
+    );
+  }
+
+  // ── Normal mode ───────────────────────────────────────────────────────────
 
   // For solo: resume existing active round if present
   if (!friend) {
@@ -62,7 +99,8 @@ export default async function AchievementPage({
       const realGuesses = all.slice(1) as GuessRecord[];
       return (
         <AchievementClient
-          initialRound={buildRound(existing.id, existing.status, init, realGuesses, existing.game.title, existing.game.headerImage)}
+          challengeId={existing.challengeId ?? undefined}
+          initialRound={buildRound(existing.id, existing.status, init, realGuesses, existing.game.title, existing.game.headerImage, undefined, existing.challengeId ?? undefined)}
         />
       );
     }

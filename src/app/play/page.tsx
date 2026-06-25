@@ -23,7 +23,7 @@ async function pickEnrichedGame(userId: string) {
 export default async function PlayPage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -31,7 +31,34 @@ export default async function PlayPage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ────────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({ where: { id: challenge } });
+    if (!chal || !["solo", "friend"].includes(chal.mode) || !chal.gameAppId || chal.expiresAt < new Date()) {
+      redirect("/");
+    }
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const forcedGame = await db.game.findUnique({ where: { steamAppId: chal.gameAppId } });
+    if (!forcedGame) redirect("/");
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: chal.gameAppId, mode: chal.mode, status: "active", challengeId: chal.id },
+    });
+    return (
+      <GameClient
+        challengeId={chal.id}
+        initialRound={{ id: round.id, status: "active", mode: chal.mode as "solo" | "friend", guesses: [], maxGuesses: MAX_GUESSES }}
+      />
+    );
+  }
+
+  // ── Normal mode ───────────────────────────────────────────────────────────
 
   // For solo: resume existing active round if present
   if (!friend) {
@@ -47,6 +74,7 @@ export default async function PlayPage({
       const finished = won || lost;
       return (
         <GameClient
+          challengeId={existing.challengeId ?? undefined}
           initialRound={{
             id: existing.id,
             status: existing.status as "active" | "won" | "lost",

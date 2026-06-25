@@ -14,10 +14,12 @@ model User {
   createdAt   DateTime  @default(now()) @db.Timestamptz()
   syncedAt    DateTime? @db.Timestamptz()
 
-  games       UserGame[]
-  roundsPlayed Round[]  @relation("PlayerRounds")
-  roundsOwned  Round[]  @relation("TargetRounds")
-  stats        Stats?
+  games              UserGame[]
+  roundsPlayed       Round[]     @relation("PlayerRounds")
+  roundsOwned        Round[]     @relation("TargetRounds")
+  stats              Stats?
+  challengesCreated  Challenge[] @relation("ChallengeCreator")
+  challengesTargeted Challenge[] @relation("ChallengeTarget")
 
   @@map("users")
 }
@@ -39,6 +41,7 @@ model Game {
 
   userGames        UserGame[]
   rounds           Round[]
+  challenges       Challenge[]
 
   @@map("games")
 }
@@ -62,15 +65,35 @@ model Round {
   targetAppId  Int
   mode         String   @db.VarChar(20)
   status       String   @db.VarChar(20) @default("active")
+  challengeId  String?  @db.Uuid
   createdAt    DateTime @default(now()) @db.Timestamptz()
 
-  player  User     @relation("PlayerRounds", fields: [playerUserId], references: [id])
-  target  User     @relation("TargetRounds", fields: [targetUserId], references: [id])
-  game    Game     @relation(fields: [targetAppId], references: [steamAppId])
-  guesses Guess[]
+  player    User       @relation("PlayerRounds", fields: [playerUserId], references: [id])
+  target    User       @relation("TargetRounds", fields: [targetUserId], references: [id])
+  game      Game       @relation(fields: [targetAppId], references: [steamAppId])
+  challenge Challenge? @relation(fields: [challengeId], references: [id])
+  guesses   Guess[]
 
   @@index([playerUserId, status])
   @@map("rounds")
+}
+
+model Challenge {
+  id           String   @id @default(uuid()) @db.Uuid
+  mode         String   @db.VarChar(20)
+  gameAppId    Int?
+  targetUserId String   @db.Uuid
+  creatorId    String   @db.Uuid
+  status       String   @db.VarChar(20) @default("pending")
+  expiresAt    DateTime @db.Timestamptz()
+  createdAt    DateTime @default(now()) @db.Timestamptz()
+
+  game    Game?  @relation(fields: [gameAppId], references: [steamAppId])
+  target  User   @relation("ChallengeTarget", fields: [targetUserId], references: [id])
+  creator User   @relation("ChallengeCreator", fields: [creatorId], references: [id])
+  rounds  Round[]
+
+  @@map("challenges")
 }
 
 model Guess {

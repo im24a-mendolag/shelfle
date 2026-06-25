@@ -43,7 +43,7 @@ function pickFrom(pool: HLGame[], exclude: Set<number>): HLGame | null {
 export default async function HigherLowerPage({
   searchParams,
 }: {
-  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string }>;
+  searchParams: Promise<{ friend?: string; friendName?: string; friendAvatar?: string; challenge?: string }>;
 }) {
   const session = await getServerSession(authCallbacks);
   if (!session?.user.steamId) redirect("/");
@@ -51,7 +51,53 @@ export default async function HigherLowerPage({
   const user = await syncUser(session.user.steamId, session.user.name ?? "");
   await syncLibrary(user.id, session.user.steamId);
 
-  const { friend, friendName, friendAvatar } = await searchParams;
+  const { friend, friendName, friendAvatar, challenge } = await searchParams;
+
+  // ── Challenge mode ────────────────────────────────────────────────────────
+  if (challenge) {
+    const chal = await db.challenge.findUnique({ where: { id: challenge } });
+    if (!chal || chal.mode !== "higherlower" || chal.expiresAt < new Date()) redirect("/");
+    const alreadyPlayed = await db.round.findFirst({ where: { playerUserId: user.id, challengeId: chal.id } });
+    if (alreadyPlayed) redirect(`/challenge/${challenge}/results`);
+
+    await db.round.updateMany({ where: { playerUserId: user.id, status: "active" }, data: { status: "abandoned" } });
+
+    const compareMode: "year" | "price" | "players" = "year";
+    const pool = await pickPool(chal.targetUserId);
+    if (pool.length < 2) redirect("/");
+
+    const leftGame = pool[Math.floor(Math.random() * pool.length)];
+    const rightGame = pickFrom(pool, new Set([leftGame.steamAppId]))!;
+
+    const round = await db.round.create({
+      data: { playerUserId: user.id, targetUserId: chal.targetUserId, targetAppId: leftGame.steamAppId, mode: "higherlower", status: "active", challengeId: chal.id },
+    });
+
+    const init: InitRecord = {
+      type: "init",
+      compareMode,
+      leftAppId: leftGame.steamAppId, leftTitle: leftGame.title, leftImage: leftGame.headerImage, leftYear: leftGame.releaseYear, leftPrice: leftGame.priceChfCents, leftPlayers: leftGame.avgPlayers24h,
+      rightAppId: rightGame.steamAppId, rightTitle: rightGame.title, rightImage: rightGame.headerImage, rightYear: rightGame.releaseYear, rightPrice: rightGame.priceChfCents, rightPlayers: rightGame.avgPlayers24h,
+    };
+
+    await db.guess.create({ data: { roundId: round.id, guessedAppId: rightGame.steamAppId, resultJson: init as object } });
+
+    return (
+      <HigherLowerClient
+        challengeId={chal.id}
+        initialRound={{
+          id: round.id,
+          status: "active",
+          score: 0,
+          compareMode,
+          leftGame: { steamAppId: leftGame.steamAppId, title: leftGame.title, headerImage: leftGame.headerImage, releaseYear: leftGame.releaseYear, priceChfCents: leftGame.priceChfCents, avgPlayers24h: leftGame.avgPlayers24h },
+          rightGame: { steamAppId: rightGame.steamAppId, title: rightGame.title, headerImage: rightGame.headerImage },
+        }}
+      />
+    );
+  }
+
+  // ── Normal mode ───────────────────────────────────────────────────────────
 
   // For solo: resume existing active round if present
   if (!friend) {
@@ -77,6 +123,7 @@ export default async function HigherLowerPage({
 
       return (
         <HigherLowerClient
+          challengeId={existing.challengeId ?? undefined}
           initialRound={{ id: existing.id, status: existing.status as "active" | "lost", score, compareMode, leftGame, rightGame }}
         />
       );
