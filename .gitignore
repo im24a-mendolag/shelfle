@@ -24,3 +24,13 @@ Thumbs.db
 logs/
 
 /src/generated/prisma
+
+# Vercel
+.vercel/
+
+# Database dumps (never commit — full data)
+*.dump
+*.bak
+
+# Agent skills (fetched; see skills-lock.json)
+.agents/
